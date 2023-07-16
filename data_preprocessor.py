@@ -26,7 +26,9 @@ class TFTOutputBatch:
 class TFTDataloader:
     """Custom dataloader for time series"""
 
-    def __init__(self, data: pd.DataFrame, cfg: TFTConfig, shuffle: bool = False) -> None:
+    def __init__(
+        self, data: pd.DataFrame, cfg: TFTConfig, shuffle: bool = False
+    ) -> None:
         self.data = data
         self.cfg = cfg
         self.shuffle = shuffle
@@ -59,11 +61,16 @@ class TFTDataloader:
             end_seq_idx = int(self.data.loc[i, "time_last"].values)
 
             # Get data from data frame
-            cont_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cont_var].values)
-            cat_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cat_var].values)
+            cont_batches.append(
+                self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cont_var].values
+            )
+            cat_batches.append(
+                self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cat_var].values
+            )
             target_batches.append(
                 self.data.loc[
-                    start_seq_idx + self.cfg.encoder_len : end_seq_idx, self.cfg.target_var
+                    start_seq_idx + self.cfg.encoder_len : end_seq_idx,
+                    self.cfg.target_var,
                 ].values
             )
 
@@ -282,7 +289,9 @@ class Preprocessor:
             tmp.drop_duplicates(inplace=True)
 
             # Add sequence indices
-            tmp = self.add_sequence_index(data_frame=tmp, seq_len=seq_len, start_point=len(tmp))
+            tmp = self.add_sequence_index(
+                data_frame=tmp, seq_len=seq_len, start_point=len(tmp)
+            )
 
             # Store datafrmae
             merged_df.append(tmp)
@@ -306,7 +315,9 @@ class Preprocessor:
         added_data_frame["end_seq_idx"] = np.arange(num_rows) + seq_len - 1
 
         # Clip indices going beyond num_rows
-        added_data_frame["end_seq_idx"] = added_data_frame["end_seq_idx"].clip(upper=num_rows - 1)
+        added_data_frame["end_seq_idx"] = added_data_frame["end_seq_idx"].clip(
+            upper=num_rows - 1
+        )
 
         return added_data_frame
 
@@ -316,7 +327,9 @@ class Preprocessor:
         filled_df = raw_df.copy()
         start_date = min(filled_df.fillna(method="ffill").dropna().index)
         end_date = max(filled_df.fillna(method="bfill").dropna().index)
-        active_dt_range = (filled_df.index >= start_date) & (filled_df.index <= end_date)
+        active_dt_range = (filled_df.index >= start_date) & (
+            filled_df.index <= end_date
+        )
 
         # Fill all the missing data outside of active range with nan
         filled_df = filled_df[active_dt_range].fillna(0.0)
