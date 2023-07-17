@@ -26,9 +26,7 @@ class TFTOutputBatch:
 class TFTDataloader:
     """Custom dataloader for time series"""
 
-    def __init__(
-        self, data: pd.DataFrame, cfg: TFTConfig, shuffle: bool = False
-    ) -> None:
+    def __init__(self, data: pd.DataFrame, cfg: TFTConfig, shuffle: bool = False) -> None:
         self.data = data
         self.cfg = cfg
         self.shuffle = shuffle
@@ -61,12 +59,8 @@ class TFTDataloader:
             end_seq_idx = int(self.data.loc[i, "time_last"].values)
 
             # Get data from data frame
-            cont_batches.append(
-                self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cont_var].values
-            )
-            cat_batches.append(
-                self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cat_var].values
-            )
+            cont_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cont_var].values)
+            cat_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cat_var].values)
             target_batches.append(
                 self.data.loc[
                     start_seq_idx + self.cfg.encoder_len : end_seq_idx,
@@ -159,7 +153,7 @@ class LabelEncoder:
 
 
 class MultiLabelEncoder:
-    """Transform multi categorical variables to the numerical lables"""
+    """Transform multi categorical variables to the numerical labels"""
 
     def __init__(self):
         self.encoders = {}
@@ -270,6 +264,7 @@ class Preprocessor:
             tmp["time_idx"] = delta_time.seconds / 60 / 60 + delta_time.days * (
                 3600 / self.cfg.forecast_freq
             )
+
             # TODO: Should we provide a separe data frame with all time indices?
             tmp["time_idx"] = tmp["time_idx"].astype("int")
             tmp["time_first"] = tmp["time_idx"].iloc[0]
@@ -289,17 +284,27 @@ class Preprocessor:
             tmp.drop_duplicates(inplace=True)
 
             # Add sequence indices
-            tmp = self.add_sequence_index(
-                data_frame=tmp, seq_len=seq_len, start_point=len(tmp)
-            )
+            tmp = self.add_sequence_index(data_frame=tmp, seq_len=seq_len, start_point=len(tmp))
 
-            # Store datafrmae
+            # Store data frame
             merged_df.append(tmp)
 
         merged_df = pd.concat(merged_df)
         merged_df.reset_index(inplace=True)
 
         return merged_df
+
+    def _encode_cat_var(self) -> pd.DataFrame:
+        """Convert all categorical columns into the numeric classes based on user-specified encoding
+        methods.
+        """
+        # TODO: need to define a variable to contain encoding info for inversing transformation
+        raise NotImplementedError
+
+    def _normalize_cat_var(self) -> pd.DataFrame:
+        """Normalize the continous variables based on user-specified normalization method"""
+        # TODO: need to define a variable to contain normalization info for inversing transformation
+        raise NotImplementedError
 
     @staticmethod
     def add_sequence_index(
@@ -315,9 +320,7 @@ class Preprocessor:
         added_data_frame["end_seq_idx"] = np.arange(num_rows) + seq_len - 1
 
         # Clip indices going beyond num_rows
-        added_data_frame["end_seq_idx"] = added_data_frame["end_seq_idx"].clip(
-            upper=num_rows - 1
-        )
+        added_data_frame["end_seq_idx"] = added_data_frame["end_seq_idx"].clip(upper=num_rows - 1)
 
         return added_data_frame
 
@@ -327,9 +330,7 @@ class Preprocessor:
         filled_df = raw_df.copy()
         start_date = min(filled_df.fillna(method="ffill").dropna().index)
         end_date = max(filled_df.fillna(method="bfill").dropna().index)
-        active_dt_range = (filled_df.index >= start_date) & (
-            filled_df.index <= end_date
-        )
+        active_dt_range = (filled_df.index >= start_date) & (filled_df.index <= end_date)
 
         # Fill all the missing data outside of active range with nan
         filled_df = filled_df[active_dt_range].fillna(0.0)

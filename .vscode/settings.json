@@ -2,5 +2,20 @@
     "[python]": {
         "editor.defaultFormatter": "ms-python.black-formatter"
     },
-    "python.formatting.provider": "none"
+    "python.linting.pylintArgs": [
+        "--generated-members=torch.*,nn.*",
+        "--ignored-modules=torch",
+        "--additional-argument=argument_value"
+    ],
+    "python.formatting.provider": "none",
+    "editor.formatOnSave": true,
+    "editor.wordWrap": "off",
+    "editor.rulers": [
+        100
+    ],
+    "editor.trimAutoWhitespace": true,
+    "python.formatting.blackArgs": [
+        "--line-length",
+        "100"
+    ]
 }
