@@ -43,6 +43,7 @@ class TFTConfig:
 
     cont_normalizers: Union[Dict[str, str], None] = None
     cat_encoders: Union[Dict[str, str], None] = None
+    cont_transformations: Union[Dict[str, Union[str, None]], None] = None
 
     # Post user-specified variables. This is done after the initialization
     target_var: List[str] = field(default_factory=list)
@@ -70,12 +71,17 @@ class TFTConfig:
         if self.cont_normalizers is None or len(self.cont_normalizers) < len(self.cont_var):
             self.cont_normalizers = self._default_cont_normalizer()
 
+        # Get default methods for transformations
+        if self.cont_transformations is None:
+            self.cont_transformations = self._default_cont_transformation()
+
     def _get_cat_var_ordering(self) -> List[str]:
         """Get all categorical variables including multi-categorical variables.
         The ordering of categorical variable list will be the same with the data frame
         columns in preprocessing pipeline. This allows maintaining the ordering when
         feeding the input & output data to TFT network.
         """
+
         cat_vars = self.time_varying_cat_decoder + self.time_varying_cat_encoder + self.static_cats
         cat_var_ordering = []
         for var in cat_vars:
@@ -86,24 +92,40 @@ class TFTConfig:
 
         return cat_var_ordering
 
-    def _default_cat_encoders(self) -> List[str]:
-        """Get encoding method for each categorical variable. Default to `labelEncoder`"""
+    def _default_cat_encoders(self) -> Dict[str, str]:
+        """Initalize encoding method for each categorical variable. Default to `labelEncoder`"""
+
         cat_vars = self.time_varying_cat_decoder + self.time_varying_cat_encoder + self.static_cats
-        cat_encoders = self.cat_encoders or {}
+        cat_encoders = self.cat_encoders.copy() if self.cat_encoders is not None else {}
         for var in cat_vars:
             if var not in cat_encoders:
-                cat_encoders[var] = "labelEncoder"
+                cat_encoders[var] = "label_encoder"
 
         return cat_encoders
 
-    def _default_cont_normalizer(self) -> List[str]:
-        """Get normalization method for each continous variable. Default to `standard`"""
+    def _default_cont_normalizer(self) -> Dict[str, str]:
+        """Initialize normalization method for each continous variable. Default to `standard`"""
+
         cont_vars = (
             self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
         )
-        cont_normalizers = self.cont_normalizers or {}
+        cont_normalizers = self.cont_normalizers.copy() if self.cont_normalizers is not None else {}
         for var in cont_vars:
             if var not in cont_normalizers:
                 cont_normalizers[var] = "standard"
 
         return cont_normalizers
+
+    def _default_cont_transformation(self) -> Dict[str, str]:
+        """Initalize the transformation method fo each continous variables.Default to None"""
+        cont_vars = (
+            self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+        )
+        cont_transformations = (
+            self.cont_transformations.copy() if self.cont_transformations is not None else {}
+        )
+        for var in cont_vars:
+            if var not in cont_transformations:
+                cont_transformations[var] = None
+
+        return cont_transformations

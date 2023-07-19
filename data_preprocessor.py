@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Tuple, Dict
 import numpy as np
 import pandas as pd
 from config import TFTConfig
@@ -153,7 +153,9 @@ class LabelEncoder:
 
 
 class MultiLabelEncoder:
-    """Transform multi categorical variables to the numerical labels"""
+    """Transform multi categorical variables to the numerical labels. For example, the input data
+    could be an array including multiple categorical variables
+    """
 
     def __init__(self):
         self.encoders = {}
@@ -179,49 +181,127 @@ class MultiLabelEncoder:
         return inverse
 
 
-class TimeseriesNormalizer:
-    """Normalizer for time series"""
+class TimeseriesEncoderNormalizer:
+    """This class is responsible for encoding the categorical variables and normalizing the
+    continous variables. It also provide a decoding and denormalizing those variables"""
 
-    def __init__(self, method: str) -> None:
-        self.method = method
-        self.columns = None
+    def __init__(
+        self,
+        cat_var: Dict[str, np.ndarray],
+        cont_var: Dict[str, np.ndarray],
+        cat_encoding_method: Dict[str, str],
+        cont_normalizing_method: Dict[str, str],
+    ) -> None:
+        self.cat_var = cat_var
+        self.cont_var = cont_var
+        self.cat_encoding_method = cat_encoding_method
+        self.cont_normalizing_method = cont_normalizing_method
+        self.cat_encoders: dict = {}
+        self.cont_normalizers: dict = {}
 
     @property
-    def method(self) -> None:
-        """Get scaler method"""
-        return self._method
+    def cat_encoding_method(self) -> Dict[str, str]:
+        """Get a dictionary of encoding methods for categorical variables"""
 
-    @method.setter
-    def method(self, value: str) -> str:
-        """Set scaler method"""
-        self._method = value
+        return self._cat_encoding_method
 
-        if self._method == "standard":
-            self.scaler = StandardNormalizer()
-        if self._method == "labelEncoder":
-            self.scaler = MultiLabelEncoder()
-        else:
-            raise ValueError(f"Unknown method: {self._method}")
+    @cat_encoding_method.setter
+    def cat_encoding_method(self, value: Dict[str, str]) -> None:
+        """Set a dictionary of encoding methods for categorical variables"""
 
-    def fit_transform(self, data_frame: pd.DataFrame) -> pd.DataFrame:
-        """Transform to normalized space"""
-        self.columns = data_frame.columns
-        scaled_values = self.scaler.fit_transform(data_frame.values)
+        self._cat_encoding_method = value
+        for method in self._cat_encoding_method:
+            if method == "label_encoder":
+                self.cat_encoders[method] = LabelEncoder()
+            else:
+                raise ValueError(f"Method {method} does not exist")
 
-        data_frame_scaled = pd.DataFrame(
-            scaled_values, columns=self.columns, index=data_frame.index
-        )
+    @property
+    def cont_normalizing_method(self) -> Dict[str, str]:
+        """Get a dictionary of normalizing methods for categorical variables"""
 
-        return data_frame_scaled
+        return self._cont_normalizing_method
 
-    def inverse_transform(self, data_frame_scaled: pd.DataFrame) -> pd.DataFrame:
-        """Transform the data back to original space"""
-        orginal_values = self.scaler.inverse_transform(data_frame_scaled.values)
-        data_frame = pd.DataFrame(
-            orginal_values, columns=self.columns, index=data_frame_scaled.index
-        )
+    @cont_normalizing_method.setter
+    def cont_normalizing_method(self, value: Dict[str, str]) -> None:
+        """Set a dictionary of normalizing methods for categorical variables"""
 
-        return data_frame
+        self._cont_normalizing_method = value
+        for method in self._cont_normalizing_method:
+            if method == "standard":
+                self.cont_normalizers[method] = StandardNormalizer()
+            else:
+                raise ValueError(f"Method {method} does not exist")
+
+    def encode_cat_var(self, cat_data: pd.DataFrame) -> pd.DataFrame:
+        """Encode all categorical variables"""
+
+        assert len(cat_data) == len(self.cat_encoders), "Categorical encoders are invalid"
+        cat_data_encoded = cat_data.copy()
+
+        for name, encoder in self.cat_encoders.items():
+            cat_data_encoded[name] = encoder.fit_transform(cat_data[name].values)
+
+        return cat_data_encoded
+
+    def decode_cat_var(self, cat_data: pd.DataFrame) -> pd.DataFrame:
+        """Decode all categorical variables"""
+
+        assert len(cat_data) == len(self.cat_encoders), "Categorical encoders are invalid"
+        cat_data_decoded = cat_data.copy()
+
+        for name, encoder in self.cat_encoders.items():
+            assert len(encoder.labels) > 0, "{name} does not have encoder"
+            cat_data_decoded[name] = encoder.inverse_transform(cat_data[name].values)
+
+        return cat_data_decoded
+
+    def encode_multi_cat_var(
+        self, cat_data: pd.DataFrame, multi_cat_var: Dict[str, List[str]]
+    ) -> pd.DataFrame:
+        """Encode all mutli-categorical variables"""
+
+        cat_data_encoded = cat_data.copy()
+        for name, cat_var in multi_cat_var:
+            self.cat_encoders[name].fit(cat_var)
+            for var in cat_var:
+                cat_data_encoded[var] = self.cat_encoders[name].transform(cat_data[var].values)
+
+        return cat_data_encoded
+
+    def decode_multi_cat_var(
+        self, cat_data: pd.DataFrame, multi_cat_var: Dict[str, List[str]]
+    ) -> pd.DataFrame:
+        """Decode all multi-categorical variables"""
+
+        cat_data_decoded = cat_data.copy()
+        for name, cat_var in multi_cat_var:
+            for var in cat_var:
+                cat_data_decoded[var] = self.cat_encoders[name].inverse_transform(
+                    cat_data[var].values
+                )
+
+        return cat_data_decoded
+
+    def normalize(self, cont_data: pd.DataFrame) -> pd.DataFrame:
+        """Normalize all continuous variables"""
+        assert len(cont_data) == len(self.cont_normalizers), "Normalizers are invalid"
+
+        cont_data_normalized = cont_data.copy()
+        for name, normalizer in self.cont_normalizers.items():
+            cont_data_normalized[name] = normalizer.fit_transform(cont_data[name].values)
+
+        return cont_data_normalized
+
+    def denormalize(self, cont_data: pd.DataFrame) -> pd.DataFrame:
+        """Denormalize all continuous variables"""
+        assert len(cont_data) == len(self.cont_normalizers), "Normalizers are invalid"
+
+        cont_data_denormalized = cont_data.copy()
+        for name, normalizer in self.cont_normalizers.items():
+            cont_data_denormalized[name] = normalizer.inverse_transform(cont_data[name.values])
+
+        return cont_data_denormalized
 
 
 class Preprocessor:
