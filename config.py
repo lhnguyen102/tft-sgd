@@ -7,8 +7,8 @@ class TFTConfig:
     """TFT configuration"""
 
     # Network hyperparameters
-    max_embedding_size: int
-    seq_len: int
+    # max_embedding_size: int
+    # seq_len: int
     num_targets: int = 1
     batch_size: int = 8
     output_size: Union[List[int], int] = 7  # number of quantiles
@@ -23,109 +23,174 @@ class TFTConfig:
         List[Tuple[int, int]],
         None,
     ] = None
-    embedding_paddings: Union[List[str], None] = None
-    x_cats: Union[List[str], None] = None
+    embedding_paddings: List[str] = field(default_factory=list)
     hidden_cont_sizes: Union[Dict[str, int], None] = None
     hidden_cont_size: int = 8  # default
     decoder_len: int = 24
     encoder_len: int = 168
 
     # Data variables
-    time_varying_cat_encoder: Union[List[str], None] = None
-    time_varying_cat_decoder: Union[List[str], None] = None
-    time_varying_real_encoder: Union[List[str], None] = None
-    time_varying_real_decoder: Union[List[str], None] = None
-    static_reals: Union[List[str], None] = None
-    static_cats: Union[List[str], None] = None
-    multi_cat_var: Union[Dict[str, List[str]], None] = None
+    target_var: List[str] = field(default_factory=list)
+    time_cat_features = ["hour", "day", "day_of_week", "month"]
+    time_varying_cat_encoder: List[str] = field(default_factory=list)
+    time_varying_cat_decoder: List[str] = field(default_factory=list)
+    time_varying_real_encoder: List[str] = field(default_factory=list)
+    time_varying_real_decoder: List[str] = field(default_factory=list)
+    static_reals: List[str] = field(default_factory=list)
+    static_cats: List[str] = field(default_factory=list)
+    multi_cat_var: List[str] = field(default_factory=list)
     is_single_var_grns_shared: bool = False
     forecast_freq: float = 3600
 
-    cont_normalizers: Union[Dict[str, str], None] = None
-    cat_encoders: Union[Dict[str, str], None] = None
-    cont_transformations: Union[Dict[str, Union[str, None]], None] = None
+    cont_normalizing_method: Union[Dict[str, str], None] = None
+    cat_encoding_method: Union[Dict[str, str], None] = None
+    cont_transform_method: Union[Dict[str, str], None] = None
 
     # Post user-specified variables. This is done after the initialization
-    target_var: List[str] = field(default_factory=list)
     cont_var: List[str] = field(default_factory=list)
     cat_var: List[str] = field(default_factory=list)
-    cont_var_ordering: List[str] = field(default_factory=list)
-    cat_var_ordering: List[str] = field(default_factory=list)
+    cat_var_ordering: Union[Dict[str, int], None] = None
+    cont_var_ordering: Union[Dict[str, int], None] = None
 
-    def __post__init__(self):
+    def __post_init__(self):
         """Post-initalize the config variables. Some variables will be defined after
         user-specifying the inputs"""
-        self.cont_var = (
-            self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
-        )  # TODO: add unique varaibles
-        self.cat_var = (
-            self.time_varying_cat_decoder + self.time_varying_cat_encoder + self.static_cats
+        self.cont_var = list(
+            dict.fromkeys(
+                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+            )
         )
+        self.cat_var = list(
+            dict.fromkeys(
+                self.time_varying_cat_decoder
+                + self.time_varying_cat_encoder
+                + self.static_cats
+                + self.time_cat_features
+            )
+        )
+
+        # Get ordering for variables in dataset
         self.cat_var_ordering = self._get_cat_var_ordering()
-        self.cont_var_ordering = self.cont_var
+        self.cont_var_ordering = self._get_cont_var_ordering()
 
         # Get default methods for encoding and normalization methods for each data variables.
         # Support incompleted user-specified inputs.
-        if self.cat_encoders is None or len(self.cat_encoders) < len(self.cat_var):
-            self.cat_encoders = self._default_cat_encoders()
-        if self.cont_normalizers is None or len(self.cont_normalizers) < len(self.cont_var):
-            self.cont_normalizers = self._default_cont_normalizer()
+        if self.cat_encoding_method is None or len(self.cat_encoding_method) < len(self.cat_var):
+            self.cat_encoding_method = self._default_cat_encoding_method()
+
+        if self.cont_normalizing_method is None or len(self.cont_normalizing_method) < len(
+            self.cont_var
+        ):
+            self.cont_normalizing_method = self._default_cont_normalizer()
 
         # Get default methods for transformations
-        if self.cont_transformations is None:
-            self.cont_transformations = self._default_cont_transformation()
+        if self.cont_transform_method is None:
+            self.cont_transform_method = self._default_cont_transformation()
 
-    def _get_cat_var_ordering(self) -> List[str]:
+    def _get_cat_var_ordering(self) -> Dict[str, int]:
         """Get all categorical variables including multi-categorical variables.
         The ordering of categorical variable list will be the same with the data frame
         columns in preprocessing pipeline. This allows maintaining the ordering when
         feeding the input & output data to TFT network.
         """
 
-        cat_vars = self.time_varying_cat_decoder + self.time_varying_cat_encoder + self.static_cats
-        cat_var_ordering = []
+        cat_vars = list(
+            dict.fromkeys(
+                self.time_varying_cat_decoder
+                + self.time_varying_cat_encoder
+                + self.static_cats
+                + self.time_cat_features
+            )
+        )
+        cat_var_cols = []
         for var in cat_vars:
             if var in self.multi_cat_var:
-                cat_var_ordering.extend(self.multi_cat_var[var])
+                cat_var_cols.extend(self.multi_cat_var[var])
             else:
-                cat_var_ordering.append(var)
+                cat_var_cols.append(var)
+
+        cat_var_ordering: Dict[str, int] = {}
+        for i, var in enumerate(cat_var_cols):
+            cat_var_ordering[var] = i
 
         return cat_var_ordering
 
-    def _default_cat_encoders(self) -> Dict[str, str]:
+    def _get_cont_var_ordering(self) -> Dict[str, int]:
+        """Get ordering for variables in data frame. This will be required in order to feed data to
+        different network in TFT"""
+        cont_vars = list(
+            dict.fromkeys(
+                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+            )
+        )
+        cont_var_ordering: Dict[str, int] = {}
+        for i, col in enumerate(cont_vars):
+            cont_var_ordering[col] = i
+
+        return cont_var_ordering
+
+    def _default_cat_encoding_method(self) -> Dict[str, str]:
         """Initalize encoding method for each categorical variable. Default to `labelEncoder`"""
 
-        cat_vars = self.time_varying_cat_decoder + self.time_varying_cat_encoder + self.static_cats
-        cat_encoders = self.cat_encoders.copy() if self.cat_encoders is not None else {}
+        cat_vars = list(
+            dict.fromkeys(
+                self.time_varying_cat_decoder
+                + self.time_varying_cat_encoder
+                + self.static_cats
+                + self.time_cat_features
+            )
+        )
+        cat_encoding_method = (
+            self.cat_encoding_method.copy() if self.cat_encoding_method is not None else {}
+        )
         for var in cat_vars:
-            if var not in cat_encoders:
-                cat_encoders[var] = "label_encoder"
+            if var not in cat_encoding_method:
+                cat_encoding_method[var] = "label_encoder"
 
-        return cat_encoders
+        return cat_encoding_method
 
     def _default_cont_normalizer(self) -> Dict[str, str]:
         """Initialize normalization method for each continous variable. Default to `standard`"""
 
-        cont_vars = (
-            self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+        cont_vars = list(
+            dict.fromkeys(
+                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+            )
         )
-        cont_normalizers = self.cont_normalizers.copy() if self.cont_normalizers is not None else {}
+        cont_normalizing_method = (
+            self.cont_normalizing_method.copy() if self.cont_normalizing_method is not None else {}
+        )
         for var in cont_vars:
-            if var not in cont_normalizers:
-                cont_normalizers[var] = "standard"
+            if var not in cont_normalizing_method:
+                cont_normalizing_method[var] = "standard"
 
-        return cont_normalizers
+        return cont_normalizing_method
 
     def _default_cont_transformation(self) -> Dict[str, str]:
         """Initalize the transformation method fo each continous variables.Default to None"""
-        cont_vars = (
-            self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+        cont_vars = list(
+            dict.fromkeys(
+                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+            )
         )
-        cont_transformations = (
-            self.cont_transformations.copy() if self.cont_transformations is not None else {}
+        cont_transform_method = (
+            self.cont_transform_method.copy() if self.cont_transform_method is not None else {}
         )
         for var in cont_vars:
-            if var not in cont_transformations:
-                cont_transformations[var] = None
+            if var not in cont_transform_method:
+                cont_transform_method[var] = "no_transform"
 
-        return cont_transformations
+        return cont_transform_method
+
+    def _calculate_embedding_size(num_categories: int) -> int:
+        """
+        Calculate the embedding size based on the number of categories using fast.ai heuristic.
+
+        Args:
+            num_categories (int): Number of unique categories.
+
+        Returns:
+            int: Embedding size.
+        """
+
+        return min(600, round(1.6 * num_categories**0.56))

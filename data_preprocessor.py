@@ -1,9 +1,12 @@
-from typing import List, Tuple, Dict
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Dict, List, Tuple, Union
+
 import numpy as np
 import pandas as pd
-from config import TFTConfig
 import torch
-from dataclasses import dataclass
+
+from config import TFTConfig
 
 
 @dataclass
@@ -92,16 +95,90 @@ class TFTDataloader:
             raise StopIteration
 
 
-class StandardNormalizer:
+class TransformationFun:
+    """Transformation function of data"""
+
+    def __init__(self, method: str) -> None:
+        self.method = method
+
+    @property
+    def method(self) -> str:
+        """Get transformation method"""
+        return self._method
+
+    @method.setter
+    def method(self, value: str) -> None:
+        """Set transformation method"""
+        self._method = value
+        self.transformtation = {
+            "softplus": (self.softplus, self.inverse_softplus),
+            "no_transform": (self.no_transform, self.no_transform),
+        }
+
+        try:
+            self.transform_fn, self.inverse_fn = self.transformtation[self._method]
+        except KeyError:
+            raise ValueError(f"Unknown transformation method: {self._method}")
+
+    def transform(self, x_original) -> np.ndarray:
+        """Original to transformed spaced"""
+        return self.transform_fn(x_original)
+
+    def inverse(self, x_transformed) -> np.ndarray:
+        """Transformed to original space"""
+        return self.inverse_fn(x_transformed)
+
+    @staticmethod
+    def softplus(x_original: np.ndarray) -> np.ndarray:
+        """Transform orginal value to transformed space using softplus"""
+        cutoff = 20
+        return np.where(x_original > cutoff, x_original, np.log1p(np.exp(x_original)))
+
+    @staticmethod
+    def inverse_softplus(x_transformed: np.ndarray) -> np.ndarray:
+        """Transform the transformed space to original space using inverse sofplus"""
+        cutoff = 20
+        return np.where(x_transformed > cutoff, x_transformed, np.log(np.expm1(x_transformed)))
+
+    @staticmethod
+    def no_transform(x_original: np.ndarray) -> np.ndarray:
+        """No transformation"""
+        return x_original
+
+
+class BaseNormalizer(ABC):
+    """Base class for normalizer"""
+
+    def __init__(self) -> None:
+        pass
+
+    @abstractmethod
+    def fit(self, values: np.ndarray):
+        pass
+
+    @abstractmethod
+    def transform(self, original_values: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def fit_transform(self, original_values: np.ndarray) -> np.ndarray:
+        pass
+
+    @abstractmethod
+    def inverse_transform(self, scaled_values: np.ndarray) -> np.ndarray:
+        pass
+
+
+class StandardNormalizer(BaseNormalizer):
     """Standard normalization of the data"""
 
     def __init__(self) -> None:
         self.mean_: np.ndarray = None
         self.scale_: np.ndarray = None
 
-    def fit(self, values: np.ndarray):
-        self.mean_ = np.nanmean(values, axis=0)
-        self.scale_ = np.nanstd(values, axis=0)
+    def fit(self, values: np.ndarray) -> "StandardNormalizer":
+        self.mean_ = np.nanmean(values, axis=0, keepdims=True)
+        self.scale_ = np.nanstd(values, axis=0, keepdims=True)
         self.scale_[self.scale_ == 0] = 1
 
         return self
@@ -191,13 +268,13 @@ class TimeseriesEncoderNormalizer:
         cont_var: Dict[str, np.ndarray],
         cat_encoding_method: Dict[str, str],
         cont_normalizing_method: Dict[str, str],
+        cont_transform_method: Dict[str, str],
     ) -> None:
         self.cat_var = cat_var
         self.cont_var = cont_var
         self.cat_encoding_method = cat_encoding_method
         self.cont_normalizing_method = cont_normalizing_method
-        self.cat_encoders: dict = {}
-        self.cont_normalizers: dict = {}
+        self.cont_transform_method = cont_transform_method
 
     @property
     def cat_encoding_method(self) -> Dict[str, str]:
@@ -210,16 +287,16 @@ class TimeseriesEncoderNormalizer:
         """Set a dictionary of encoding methods for categorical variables"""
 
         self._cat_encoding_method = value
-        for method in self._cat_encoding_method:
+        self.cat_encoders: Dict[str, LabelEncoder] = {}
+        for name, method in self._cat_encoding_method.items():
             if method == "label_encoder":
-                self.cat_encoders[method] = LabelEncoder()
+                self.cat_encoders[name] = LabelEncoder()
             else:
-                raise ValueError(f"Method {method} does not exist")
+                raise ValueError(f"Unlnow encoding method for [{name}]: {method}")
 
     @property
     def cont_normalizing_method(self) -> Dict[str, str]:
         """Get a dictionary of normalizing methods for categorical variables"""
-
         return self._cont_normalizing_method
 
     @cont_normalizing_method.setter
@@ -227,16 +304,30 @@ class TimeseriesEncoderNormalizer:
         """Set a dictionary of normalizing methods for categorical variables"""
 
         self._cont_normalizing_method = value
-        for method in self._cont_normalizing_method:
+        self.cont_normalizers: Dict[str, BaseNormalizer] = {}
+        for name, method in self._cont_normalizing_method.items():
             if method == "standard":
-                self.cont_normalizers[method] = StandardNormalizer()
+                self.cont_normalizers[name] = StandardNormalizer()
             else:
-                raise ValueError(f"Method {method} does not exist")
+                raise ValueError(f"Unknown normalizing method for [{name}]: {method}")
+
+    @property
+    def cont_transform_method(self) -> Dict[str, str]:
+        """Get the transform method"""
+        return self._cont_transform_method
+
+    @cont_transform_method.setter
+    def cont_transform_method(self, value: Dict[str, str]) -> None:
+        """Set the transform method"""
+        self._cont_transform_method = value
+        self.cont_transfom_fn: Dict[str, TransformationFun] = {}
+
+        for name, method in self._cont_transform_method.items():
+            self.cont_transfom_fn[name] = TransformationFun(method)
 
     def encode_cat_var(self, cat_data: pd.DataFrame) -> pd.DataFrame:
         """Encode all categorical variables"""
-
-        assert len(cat_data) == len(self.cat_encoders), "Categorical encoders are invalid"
+        assert cat_data.shape[1] == len(self.cat_encoders), "Categorical encoders are invalid"
         cat_data_encoded = cat_data.copy()
 
         for name, encoder in self.cat_encoders.items():
@@ -247,11 +338,11 @@ class TimeseriesEncoderNormalizer:
     def decode_cat_var(self, cat_data: pd.DataFrame) -> pd.DataFrame:
         """Decode all categorical variables"""
 
-        assert len(cat_data) == len(self.cat_encoders), "Categorical encoders are invalid"
+        assert cat_data.shape[1] == len(self.cat_encoders), "Categorical encoders are invalid"
         cat_data_decoded = cat_data.copy()
 
         for name, encoder in self.cat_encoders.items():
-            assert len(encoder.labels) > 0, "{name} does not have encoder"
+            assert len(encoder.labels) > 0, f"{name} does not have encoder"
             cat_data_decoded[name] = encoder.inverse_transform(cat_data[name].values)
 
         return cat_data_decoded
@@ -262,7 +353,7 @@ class TimeseriesEncoderNormalizer:
         """Encode all mutli-categorical variables"""
 
         cat_data_encoded = cat_data.copy()
-        for name, cat_var in multi_cat_var:
+        for name, cat_var in multi_cat_var.items():
             self.cat_encoders[name].fit(cat_var)
             for var in cat_var:
                 cat_data_encoded[var] = self.cat_encoders[name].transform(cat_data[var].values)
@@ -275,7 +366,7 @@ class TimeseriesEncoderNormalizer:
         """Decode all multi-categorical variables"""
 
         cat_data_decoded = cat_data.copy()
-        for name, cat_var in multi_cat_var:
+        for name, cat_var in multi_cat_var.items():
             for var in cat_var:
                 cat_data_decoded[var] = self.cat_encoders[name].inverse_transform(
                     cat_data[var].values
@@ -285,21 +376,25 @@ class TimeseriesEncoderNormalizer:
 
     def normalize(self, cont_data: pd.DataFrame) -> pd.DataFrame:
         """Normalize all continuous variables"""
-        assert len(cont_data) == len(self.cont_normalizers), "Normalizers are invalid"
+        assert cont_data.shape[1] == len(self.cont_normalizers), "Normalizers are invalid"
+        assert cont_data.shape[1] == len(self.cont_transfom_fn), "Transform fn are invalid"
 
         cont_data_normalized = cont_data.copy()
         for name, normalizer in self.cont_normalizers.items():
-            cont_data_normalized[name] = normalizer.fit_transform(cont_data[name].values)
+            transform_values = self.cont_transfom_fn[name].transform(cont_data[name].values)
+            cont_data_normalized[name] = normalizer.fit_transform(transform_values)
 
         return cont_data_normalized
 
     def denormalize(self, cont_data: pd.DataFrame) -> pd.DataFrame:
         """Denormalize all continuous variables"""
-        assert len(cont_data) == len(self.cont_normalizers), "Normalizers are invalid"
+        assert cont_data.shape[1] == len(self.cont_normalizers), "Normalizers are invalid"
+        assert cont_data.shape[1] == len(self.cont_transfom_fn), "Transform fn are invalid"
 
         cont_data_denormalized = cont_data.copy()
         for name, normalizer in self.cont_normalizers.items():
-            cont_data_denormalized[name] = normalizer.inverse_transform(cont_data[name.values])
+            inverse_values = self.cont_transfom_fn[name].inverse(cont_data[name.values])
+            cont_data_denormalized[name] = normalizer.inverse_transform(inverse_values)
 
         return cont_data_denormalized
 
@@ -318,6 +413,13 @@ class Preprocessor:
     def __init__(self, data: pd.DataFrame, cfg: TFTConfig) -> None:
         self.data = data
         self.cfg = cfg
+        self.normalizer_encoder = TimeseriesEncoderNormalizer(
+            cat_var=self.cfg.cat_var,
+            cont_var=self.cfg.cont_var,
+            cat_encoding_method=self.cfg.cat_encoding_method,
+            cont_normalizing_method=self.cfg.cont_normalizing_method,
+            cont_transform_method=self.cfg.cont_transform_method,
+        )
 
     def preprocess_data(self) -> pd.DataFrame:
         """Preprocess data"""
@@ -328,63 +430,136 @@ class Preprocessor:
         seq_len = self.cfg.encoder_len + self.cfg.decoder_len
 
         merged_df = []
+        start_point = 0
         for iden in data_id:
             # Extract all data relating to idenity
             tmp = self.data[self.data[self.id_col_name] == iden]
-
-            # Resample data with the forecast freqency
             tmp.set_index("date", inplace=True)
-            tmp = tmp.resample(f"{self.cfg.forecast_freq}S").mean().replace(0.0, np.nan)
 
             # Fill missing data
             tmp = self.fill_missing_data(raw_df=tmp)
 
-            # Compute the start time index based on forecast frequency
-            delta_time = tmp.index - earliest_time
-            tmp["time_idx"] = delta_time.seconds / 60 / 60 + delta_time.days * (
-                3600 / self.cfg.forecast_freq
+            # Resample data with the forecast freqency
+            cont_resampled = (
+                tmp[self.cfg.cont_var]
+                .resample(f"{self.cfg.forecast_freq}S")
+                .mean()
+                .replace(0.0, np.nan)
             )
 
-            # TODO: Should we provide a separe data frame with all time indices?
-            tmp["time_idx"] = tmp["time_idx"].astype("int")
-            tmp["time_first"] = tmp["time_idx"].iloc[0]
-            tmp["time_last"] = tmp["time_idx"].iloc[-1]
-            tmp["count"] = tmp["time_last"] - tmp["time_first"] + 1
-            tmp["time_diff_to_next"] = tmp["time_idx"].diff(-1).fillna(-1)
-            tmp["day_from_start"] = delta_time.days
+            # TODO: need to handle multi-class
+            cat_resampled = tmp[["data_id"]].resample(f"{self.cfg.forecast_freq}S").first()
+            tmp = cat_resampled.join(cont_resampled)
+
+            # Compute the start time index based on forecast frequency
+            delta_time = tmp.index - earliest_time
+
+            # Construcuted time index
+            tmp = self._construct_time_idx(
+                data_frame=tmp, forecast_freq=self.cfg.forecast_freq, delta_time=delta_time
+            )
 
             # Add time feature
-            tmp["hour"] = tmp.index.hour
-            tmp["day"] = tmp.index.day
-            tmp["data_of_week"] = tmp.index.dayofweek
-            tmp["month"] = tmp.index.month
+            tmp = self.add_time_features(data_frame=tmp, time_features=self.cfg.time_cat_features)
 
             # Sort data and drop duplicate
-            tmp.sort_values(inplace=True)
+            tmp.sort_index(inplace=True)
             tmp.drop_duplicates(inplace=True)
 
             # Add sequence indices
-            tmp = self.add_sequence_index(data_frame=tmp, seq_len=seq_len, start_point=len(tmp))
+            tmp = self.add_sequence_index(data_frame=tmp, seq_len=seq_len, start_point=start_point)
+
+            # Update start point
+            start_point = len(tmp)
 
             # Store data frame
             merged_df.append(tmp)
+            del tmp
 
         merged_df = pd.concat(merged_df)
-        merged_df.reset_index(inplace=True)
+        merged_df.sort_index(inplace=True)
+
+        # Encode categorical variables
+        cat_df = self._encode_cat_var(merged_df)
+
+        # Normalize continous variables
+        norm_df = self._normalize_con_var(merged_df)
+
+        # Update data frame
+        merged_df.update(cat_df)
+        merged_df.update(norm_df)
+        breakpoint()
 
         return merged_df
 
-    def _encode_cat_var(self) -> pd.DataFrame:
+    def _encode_cat_var(self, data_frame: pd.DataFrame) -> pd.DataFrame:
         """Convert all categorical columns into the numeric classes based on user-specified encoding
         methods.
         """
-        # TODO: need to define a variable to contain encoding info for inversing transformation
-        raise NotImplementedError
+        # Single categorical variables
+        single_cat_var = [item for item in self.cfg.cat_var if item not in self.cfg.multi_cat_var]
+        single_cat_df = self.normalizer_encoder.encode_cat_var(data_frame[single_cat_var])
 
-    def _normalize_cat_var(self) -> pd.DataFrame:
+        # Multi-categorical variables
+        if len(self.cfg.multi_cat_var) > 0:
+            multi_cat_merged = []
+            for _, item in self.cfg.multi_cat_var.items():
+                multi_cat_merged.extend(item)
+
+            multi_cat_df = self.normalizer_encoder.encode_multi_cat_var(
+                data_frame[multi_cat_merged], multi_cat_var=self.cfg.multi_cat_var
+            )
+
+            return pd.merge(single_cat_df, multi_cat_df, left_index=True, right_index=True)
+        else:
+            return single_cat_df
+
+    def _normalize_con_var(self, data_frame: pd.DataFrame) -> pd.DataFrame:
         """Normalize the continous variables based on user-specified normalization method"""
-        # TODO: need to define a variable to contain normalization info for inversing transformation
-        raise NotImplementedError
+
+        norm_data_frame = self.normalizer_encoder.normalize(data_frame[self.cfg.cont_var])
+
+        return norm_data_frame
+
+    @staticmethod
+    def _construct_time_idx(
+        data_frame: pd.DataFrame, forecast_freq: float, delta_time: pd.DatetimeIndex
+    ) -> pd.DataFrame:
+        """Construct time index"""
+        indexed_df = data_frame.copy()
+        indexed_df["time_idx"] = delta_time.seconds / 60 / 60 + delta_time.days * 24 * (
+            3600 / forecast_freq
+        )
+        indexed_df["time_idx"] = indexed_df["time_idx"].astype("int")
+        indexed_df["time_first"] = indexed_df["time_idx"].iloc[0]
+        indexed_df["time_last"] = indexed_df["time_idx"].iloc[-1]
+        indexed_df["count"] = indexed_df["time_last"] - indexed_df["time_first"] + 1
+        indexed_df["time_diff_to_next"] = -indexed_df["time_idx"].diff(-1).fillna(-1)
+        indexed_df["day_from_start"] = delta_time.days
+
+        return indexed_df
+
+    @staticmethod
+    def add_time_features(data_frame: pd.DataFrame, time_features: List[str]) -> pd.DataFrame:
+        """Add time feature to data frame"""
+
+        featured_df = data_frame.copy()
+        for feature in time_features:
+            if feature == "hour":
+                featured_df[feature] = data_frame.index.hour
+            elif feature == "day":
+                featured_df[feature] = data_frame.index.day
+            elif feature == "month":
+                featured_df[feature] = data_frame.index.month
+            elif feature == "day_of_week":
+                featured_df[feature] = data_frame.index.dayofweek
+            elif feature == "year":
+                featured_df[feature] = data_frame.index.year
+            elif feature == "day_of_year":
+                featured_df[feature] = data_frame.index.dayofyear
+            else:
+                raise ValueError(f"Unknown time feature: {feature}")
+        return featured_df
 
     @staticmethod
     def add_sequence_index(
@@ -397,10 +572,12 @@ class Preprocessor:
 
         # Add start and end index
         added_data_frame["start_seq_idx"] = np.arange(num_rows) + start_point
-        added_data_frame["end_seq_idx"] = np.arange(num_rows) + seq_len - 1
+        added_data_frame["end_seq_idx"] = np.arange(num_rows) + start_point + seq_len - 1
 
         # Clip indices going beyond num_rows
         added_data_frame["end_seq_idx"] = added_data_frame["end_seq_idx"].clip(upper=num_rows - 1)
+        idx = (added_data_frame["end_seq_idx"] - added_data_frame["start_seq_idx"] + 1) == seq_len
+        added_data_frame = added_data_frame[idx]
 
         return added_data_frame
 
