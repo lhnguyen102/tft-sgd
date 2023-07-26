@@ -16,14 +16,7 @@ class TFTConfig:
     num_lstm_layers: int = 1
     num_attn_head_size: int = 4
     dropout: float = 0.1
-    embedding_sizes: Union[
-        Dict[str, Tuple[int, int]],
-        Dict[str, int],
-        List[int],
-        List[Tuple[int, int]],
-        None,
-    ] = None
-    embedding_paddings: List[str] = field(default_factory=list)
+    embedding_sizes: Union[Dict[str, Dict[str, int]], None] = None
     hidden_cont_sizes: Union[Dict[str, int], None] = None
     hidden_cont_size: int = 8  # default
     decoder_len: int = 24
@@ -34,11 +27,11 @@ class TFTConfig:
     time_cat_features = ["hour", "day", "day_of_week", "month"]
     time_varying_cat_encoder: List[str] = field(default_factory=list)
     time_varying_cat_decoder: List[str] = field(default_factory=list)
-    time_varying_real_encoder: List[str] = field(default_factory=list)
-    time_varying_real_decoder: List[str] = field(default_factory=list)
-    static_reals: List[str] = field(default_factory=list)
+    time_varying_cont_encoder: List[str] = field(default_factory=list)
+    time_varying_cont_decoder: List[str] = field(default_factory=list)
+    static_conts: List[str] = field(default_factory=list)
     static_cats: List[str] = field(default_factory=list)
-    multi_cat_var: List[str] = field(default_factory=list)
+    multi_cat_var: Union[Dict[str, List[str]], None] = None
     is_single_var_grns_shared: bool = False
     forecast_freq: float = 3600
 
@@ -57,7 +50,7 @@ class TFTConfig:
         user-specifying the inputs"""
         self.cont_var = list(
             dict.fromkeys(
-                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         self.cat_var = list(
@@ -120,7 +113,7 @@ class TFTConfig:
         different network in TFT"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_var_ordering: Dict[str, int] = {}
@@ -154,7 +147,7 @@ class TFTConfig:
 
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_normalizing_method = (
@@ -170,7 +163,7 @@ class TFTConfig:
         """Initalize the transformation method fo each continous variables.Default to None"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_real_decoder + self.time_varying_real_encoder + self.static_reals
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_transform_method = (
@@ -181,16 +174,3 @@ class TFTConfig:
                 cont_transform_method[var] = "no_transform"
 
         return cont_transform_method
-
-    def _calculate_embedding_size(num_categories: int) -> int:
-        """
-        Calculate the embedding size based on the number of categories using fast.ai heuristic.
-
-        Args:
-            num_categories (int): Number of unique categories.
-
-        Returns:
-            int: Embedding size.
-        """
-
-        return min(600, round(1.6 * num_categories**0.56))

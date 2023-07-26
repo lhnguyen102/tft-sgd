@@ -24,63 +24,49 @@ class TemporalFusionTransformer(nn.Module):
         # Input embeddings
         self.input_embeddings = MultiEmbedding(
             embedding_sizes=self.cfg.embedding_sizes,
-            categorical_groups=self.cfg.categorical_groups,
-            embedding_paddings=self.cfg.embedding_paddings,
-            x_categoricals=self.cfg.x_categoricals,
-            max_embedding_size=self.cfg.max_embedding_size,
+            cat_var=self.cfg.cat_var,
+            cat_var_ordering=self.cfg.cat_var_ordering,
+            multi_cat_var=self.cfg.multi_cat_var,
         )
 
         # Prescaler
-        self.prescalers = nn.ModuleDict(
-            {
-                name: nn.Linear(
-                    1, self.cfg.hidden_continuous_sizes.get(name, self.cfg.hidden_continuous_size)
-                )
-                for name in self.cfg.reals
-            }
-        )
+        self.prescalers = nn.ModuleDict()
+        for name in self.cfg.cont_var:
+            output_size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
+            self.prescalers[name] = nn.Linear(1, output_size)
 
         # Variable selection for static variables
         static_input_sizes = {
-            name: self.input_embeddings.output_size[name] for name in self.cfg.static_categoricals
+            name: self.cfg.embedding_sizes[name]["emb_size"] for name in self.cfg.static_cats
         }
-        static_input_sizes.update(
-            {
-                name: self.cfg.hidden_continuous_sizes.get(name, self.cfg.hidden_continuous_size)
-                for name in self.cfg.static_reals
-            }
-        )
+        for name in self.cfg.static_conts:
+            size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
+            static_input_sizes[name] = size
 
         self.static_variable_selection = VariableSelectionNetwork(
             input_sizes=static_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={name: True for name in self.cfg.static_categoricals},
+            input_embedding_flags={name: True for name in self.cfg.static_cats},
             dropout=self.cfg.dropout,
             prescalers=self.prescalers,
         )
 
         # Input size for encoder and decoder
         encoder_input_sizes = {
-            name: self.input_embeddings.output_size[name]
-            for name in self.cfg.time_varying_categorical_encoder
+            name: self.cfg.embedding_sizes[name]["emb_size"]
+            for name in self.cfg.time_varying_cat_encoder
         }
-        encoder_input_sizes.update(
-            {
-                name: self.cfg.hidden_continuous_sizes.get(name, self.cfg.hidden_continuous_size)
-                for name in self.cfg.time_varying_real_encoder
-            }
-        )
+        for name in self.cfg.time_varying_cont_encoder:
+            size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
+            encoder_input_sizes[name] = size
 
         decoder_input_sizes = {
-            name: self.input_embeddings.output_size[name]
-            for name in self.cfg.time_varying_categorical_decoder
+            name: self.cfg.embedding_sizes[name]["emb_size"]
+            for name in self.cfg.time_varying_cat_decoder
         }
-        decoder_input_sizes.update(
-            {
-                name: self.cfg.hidden_continuous_sizes.get(name, self.cfg.hidden_continuous_size)
-                for name in self.cfg.time_varying_real_decoder
-            }
-        )
+        for name in self.cfg.time_varying_cont_decoder:
+            size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
+            decoder_input_sizes[name] = size
 
         # Single variable grns that are shared across decoder and encoder
         if self.cfg.is_single_var_grns_shared:
@@ -106,9 +92,7 @@ class TemporalFusionTransformer(nn.Module):
         self.encoder_variable_selection = VariableSelectionNetwork(
             input_sizes=encoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={
-                name: True for name in self.cfg.time_varying_categorical_encoder
-            },
+            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_encoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,
@@ -121,9 +105,7 @@ class TemporalFusionTransformer(nn.Module):
         self.decoder_variable_selection = VariableSelectionNetwork(
             input_sizes=decoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={
-                name: True for name in self.cfg.time_varying_categorical_decoder
-            },
+            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_decoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,

@@ -61,7 +61,8 @@ class TFTDataloader:
             start_seq_idx = int(self.data.loc[i, "time_first"].values)
             end_seq_idx = int(self.data.loc[i, "time_last"].values)
 
-            # Get data from data frame
+            # Get data from data frame. This will ensure the ordering for both categorical and
+            # continous variables when feeding to TFT network
             cont_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cont_var].values)
             cat_batches.append(self.data.loc[start_seq_idx:end_seq_idx, self.cfg.cat_var].values)
             target_batches.append(
@@ -200,6 +201,11 @@ class LabelEncoder:
         self.labels = {}
         self.special_values = [np.nan, np.inf, -np.inf]
 
+    @property
+    def num_classes(self) -> int:
+        """Get number of classes"""
+        return len(self.labels)
+
     def fit(self, original_values: np.ndarray):
         transform_values = np.array(
             ["SpecialValue" if i in self.special_values else i for i in original_values]
@@ -292,7 +298,7 @@ class TimeseriesEncoderNormalizer:
             if method == "label_encoder":
                 self.cat_encoders[name] = LabelEncoder()
             else:
-                raise ValueError(f"Unlnow encoding method for [{name}]: {method}")
+                raise ValueError(f"Unknown encoding method for [{name}]: {method}")
 
     @property
     def cont_normalizing_method(self) -> Dict[str, str]:
@@ -439,7 +445,7 @@ class Preprocessor:
             # Fill missing data
             tmp = self.fill_missing_data(raw_df=tmp)
 
-            # Resample data with the forecast freqency
+            # Resample data with the forecast frequency
             cont_resampled = (
                 tmp[self.cfg.cont_var]
                 .resample(f"{self.cfg.forecast_freq}S")
@@ -447,8 +453,8 @@ class Preprocessor:
                 .replace(0.0, np.nan)
             )
 
-            # TODO: need to handle multi-class
-            cat_resampled = tmp[["data_id"]].resample(f"{self.cfg.forecast_freq}S").first()
+            cat_resampled = self._resample_cat_var(tmp)
+
             tmp = cat_resampled.join(cont_resampled)
 
             # Compute the start time index based on forecast frequency
@@ -482,15 +488,54 @@ class Preprocessor:
         # Encode categorical variables
         cat_df = self._encode_cat_var(merged_df)
 
+        # Update the embedding size
+        self._update_embedding_size()
+
         # Normalize continous variables
         norm_df = self._normalize_con_var(merged_df)
 
         # Update data frame
         merged_df.update(cat_df)
         merged_df.update(norm_df)
-        breakpoint()
 
         return merged_df
+
+    def _update_embedding_size(self) -> None:
+        """Update the embedding size based on the number of classes in raw data if users do
+        specify"""
+        if self.cfg.embedding_sizes is None:
+            self.cfg.embedding_sizes: Dict[str, Dict[str, int]] = {}
+            for name in self.cfg.cat_var:
+                num_classes = self.normalizer_encoder.cat_encoders[name].num_classes
+                self.cfg.embedding_sizes[name] = {
+                    "num_classes": num_classes,
+                    "emb_size": self._calculate_embedding_size(num_classes),
+                }
+
+    def _calculate_embedding_size(self, num_categories: int) -> int:
+        """
+        Calculate the embedding size based on the number of categories using fast.ai heuristic.
+
+        Args:
+            num_categories (int): Number of unique categories.
+
+        Returns:
+            int: Embedding size.
+        """
+
+        return min(600, round(1.6 * num_categories**0.56))
+
+    def _resample_cat_var(self, data_frame: pd.DataFrame) -> pd.DataFrame:
+        """Resample the time series data at given frequency"""
+
+        cat_var_cols = [col for col in data_frame.columns if col in self.cfg.cat_var]
+
+        if cat_var_cols:
+            df_resampled = data_frame[cat_var_cols].resample(f"{self.cfg.forecast_freq}S").first()
+        else:
+            df_resampled = data_frame.copy()
+
+        return df_resampled
 
     def _encode_cat_var(self, data_frame: pd.DataFrame) -> pd.DataFrame:
         """Convert all categorical columns into the numeric classes based on user-specified encoding
