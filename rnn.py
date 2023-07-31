@@ -52,7 +52,9 @@ class RNN(ABC, nn.RNNBase):
         pass
 
     @abstractmethod
-    def repeat_interleave(self, hidden_state: HiddenState, n_samples: int) -> HiddenState:
+    def repeat_interleave(
+        self, hidden_state: HiddenState, n_samples: int
+    ) -> HiddenState:
         """
         Duplicate the hidden_state n_samples times.
 
@@ -91,7 +93,9 @@ class RNN(ABC, nn.RNNBase):
                 Output is packed sequence if input has been a packed sequence.
         """
         if isinstance(x, rnn.PackedSequence) or lengths is None:
-            assert lengths is None, "cannot combine x of type PackedSequence with lengths argument"
+            assert (
+                lengths is None
+            ), "cannot combine x of type PackedSequence with lengths argument"
             return super().forward(x, hx=hx)
         else:
             min_length = lengths.min()
@@ -102,11 +106,19 @@ class RNN(ABC, nn.RNNBase):
                 hidden_state = self.init_hidden_state(x)
                 if self.batch_first:
                     out = torch.zeros(
-                        lengths.size(0), x.size(1), self.hidden_size, dtype=x.dtype, device=x.device
+                        lengths.size(0),
+                        x.size(1),
+                        self.hidden_size,
+                        dtype=x.dtype,
+                        device=x.device,
                     )
                 else:
                     out = torch.zeros(
-                        x.size(0), lengths.size(0), self.hidden_size, dtype=x.dtype, device=x.device
+                        x.size(0),
+                        lengths.size(0),
+                        self.hidden_size,
+                        dtype=x.dtype,
+                        device=x.device,
                     )
                 return out, hidden_state
             else:
@@ -135,7 +147,9 @@ class RNN(ABC, nn.RNNBase):
                     )
 
                 # return unpacked sequence
-                out, _ = rnn.pad_packed_sequence(packed_out, batch_first=self.batch_first)
+                out, _ = rnn.pad_packed_sequence(
+                    packed_out, batch_first=self.batch_first
+                )
                 return out, hidden_state
 
 
@@ -171,7 +185,9 @@ class LSTM(RNN, nn.LSTM):
         )
         return hidden, cell
 
-    def repeat_interleave(self, hidden_state: HiddenState, n_samples: int) -> HiddenState:
+    def repeat_interleave(
+        self, hidden_state: HiddenState, n_samples: int
+    ) -> HiddenState:
         hidden, cell = hidden_state
         hidden = hidden.repeat_interleave(n_samples, 1)
         cell = cell.repeat_interleave(n_samples, 1)
@@ -202,7 +218,9 @@ class GRU(RNN, nn.GRU):
         )
         return hidden
 
-    def repeat_interleave(self, hidden_state: HiddenState, n_samples: int) -> HiddenState:
+    def repeat_interleave(
+        self, hidden_state: HiddenState, n_samples: int
+    ) -> HiddenState:
         return hidden_state.repeat_interleave(n_samples, 1)
 
 
@@ -223,5 +241,7 @@ def get_rnn(cell_type: Union[Type[RNN], str]) -> Type[RNN]:
     elif cell_type == "GRU":
         rnn = GRU
     else:
-        raise ValueError(f"RNN type {cell_type} is not supported. supported: [LSTM, GRU]")
+        raise ValueError(
+            f"RNN type {cell_type} is not supported. supported: [LSTM, GRU]"
+        )
     return rnn

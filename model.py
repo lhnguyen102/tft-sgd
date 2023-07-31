@@ -23,7 +23,10 @@ class TimeDistributedInterpolation(nn.Module):
 
     def interpolate(self, observation: torch.Tensor):
         upsampled = F.interpolate(
-            observation.unsqueeze(1), self.output_size, mode="linear", align_corners=True
+            observation.unsqueeze(1),
+            self.output_size,
+            mode="linear",
+            align_corners=True,
         ).squeeze(1)
         if self.trainable:
             upsampled = upsampled * self.gate(self.mask.unsqueeze(0)) * 2.0
@@ -54,7 +57,9 @@ class TimeDistributedInterpolation(nn.Module):
 
 
 class ResampleNorm(nn.Module):
-    def __init__(self, input_size: int, output_size: int = None, trainable_add: bool = True):
+    def __init__(
+        self, input_size: int, output_size: int = None, trainable_add: bool = True
+    ):
         super().__init__()
 
         self.input_size = input_size
@@ -85,7 +90,9 @@ class ResampleNorm(nn.Module):
 class GatedLinearUnit(nn.Module):
     """Decide how much info should flow through the network"""
 
-    def __init__(self, input_size: int, hidden_size: int = None, dropout: float = None) -> None:
+    def __init__(
+        self, input_size: int, hidden_size: int = None, dropout: float = None
+    ) -> None:
         super().__init__()
 
         if dropout is not None:
@@ -118,7 +125,9 @@ class GatedLinearUnit(nn.Module):
 class AddNorm(nn.Module):
     """Add residual and normalize all values"""
 
-    def __init__(self, input_size: int, skipe_size: int = None, trainable_add: bool = True) -> None:
+    def __init__(
+        self, input_size: int, skipe_size: int = None, trainable_add: bool = True
+    ) -> None:
         super().__init__()
 
         self.input_size = input_size
@@ -233,11 +242,15 @@ class GatedResidualNetwork(nn.Module):
             if "bias" in name:
                 nn.init.zeros_(param)
             elif "linear_1" in name or "linear_2" in name:
-                nn.init.kaiming_normal_(param, a=0, mode="fan_in", nonlinearity="leaky_relu")
+                nn.init.kaiming_normal_(
+                    param, a=0, mode="fan_in", nonlinearity="leaky_relu"
+                )
             elif "context" in name:
                 nn.init.xavier_uniform_(param)
 
-    def forward(self, observation: torch.Tensor, context=None, residual=None) -> torch.Tensor:
+    def forward(
+        self, observation: torch.Tensor, context=None, residual=None
+    ) -> torch.Tensor:
         if residual is None:
             residual = observation
 
@@ -286,7 +299,11 @@ class MultiHeadAttention(nn.Module):
                 torch.nn.init.zeros_(param)
 
     def forward(
-        self, x_query: torch.Tensor, x_key: torch.Tensor, x_value: torch.Tensor, mask=None
+        self,
+        x_query: torch.Tensor,
+        x_key: torch.Tensor,
+        x_value: torch.Tensor,
+        mask=None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         heads = []
         attns = []
@@ -298,7 +315,7 @@ class MultiHeadAttention(nn.Module):
             attn = (query @ key.permute(0, 2, 1)) * (1.0 / math.sqrt(key.size(-1)))
 
             if mask is not None:
-                attn = attn.masked_fill(mask, float("-inf"))
+                attn = attn.masked_fill(mask == 1, float("-inf"))
             attn = self.softmax(attn)
             head = attn & value
 
@@ -345,25 +362,6 @@ class VariableSelectionNetwork(nn.Module):
         self.dropout = dropout
         self.context_size = context_size
 
-        if self.num_inputs > 1:
-            if self.context_size is not None:
-                self.flattened_grn = GatedResidualNetwork(
-                    input_size=self.input_size_total,
-                    hidden_size=min(self.hidden_size, self.num_inputs),
-                    output_size=self.num_inputs,
-                    dropout=self.dropout,
-                    context_size=self.context_size,
-                    residual=False,
-                )
-            else:
-                self.flattened_grn = GatedResidualNetwork(
-                    input_size=self.input_size_total,
-                    hidden_size=min(self.hidden_size, self.num_inputs),
-                    output_size=self.num_inputs,
-                    dropout=self.dropout,
-                    residual=False,
-                )
-
         self.single_variable_grns = nn.ModuleDict()
         self.prescalers = nn.ModuleDict()
         for name, input_size in self.input_sizes.items():
@@ -386,6 +384,25 @@ class VariableSelectionNetwork(nn.Module):
             elif not self.input_embedding_flags.get(name, False):
                 self.prescalers[name] = nn.Linear(1, input_size)
 
+        if self.num_inputs > 1:
+            if self.context_size is not None:
+                self.flattened_grn = GatedResidualNetwork(
+                    input_size=self.input_size_total,
+                    hidden_size=min(self.hidden_size, self.num_inputs),
+                    output_size=self.num_inputs,
+                    dropout=self.dropout,
+                    context_size=self.context_size,
+                    residual=False,
+                )
+            else:
+                self.flattened_grn = GatedResidualNetwork(
+                    input_size=self.input_size_total,
+                    hidden_size=min(self.hidden_size, self.num_inputs),
+                    output_size=self.num_inputs,
+                    dropout=self.dropout,
+                    residual=False,
+                )
+
         self.softmax = nn.Softmax(dim=-1)
 
     @property
@@ -399,6 +416,20 @@ class VariableSelectionNetwork(nn.Module):
     def num_inputs(self):
         return len(self.input_sizes)
 
+    def apply_prescalers(self, var_embedding: torch.Tensor, name: str) -> torch.Tensor:
+        """Scale the embedding varoiablers"""
+        if name in self.prescalers:
+            return self.prescalers[name](var_embedding)
+        return var_embedding
+
+    def create_sparse_weights(self, outputs: torch.Tensor) -> torch.Tensor:
+        if outputs.ndim == 3:  # -> batch size, time, hidden size, n_vars
+            return torch.ones(
+                outputs.size(0), outputs.size(1), 1, 1, device=outputs.device
+            )
+        else:  # ndim == 2 -> batch size, hidden size, n_vars
+            return torch.ones(outputs.size(0), 1, 1, device=outputs.device)
+
     def forward(
         self, observation: Dict[str, torch.Tensor], context: torch.Tensor = None
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -407,12 +438,10 @@ class VariableSelectionNetwork(nn.Module):
             weight_inputs = []
 
             for name in self.input_sizes.keys():
-                var_embedding = observation[name]
-                if name in self.prescalers:
-                    var_embedding = self.prescalers[name](var_embedding)
-
+                var_embedding = self.apply_prescalers(observation[name], name)
                 weight_inputs.append(var_embedding)
                 var_outputs.append(self.single_variable_grns[name](var_embedding))
+
             var_outputs = torch.stack(var_outputs, dim=-1)
 
             flat_embedding = torch.cat(weight_inputs, dim=-1)
@@ -424,16 +453,8 @@ class VariableSelectionNetwork(nn.Module):
 
         else:  # one input
             name = next(iter(self.single_variable_grns.keys()))
-            var_embedding = observation[name]
-            if name in self.prescalers:
-                var_embedding = self.prescalers[name](var_embedding)
+            var_embedding = self.apply_prescalers(observation[name], name)
             outputs = self.single_variable_grns[name](var_embedding)
-
-            if outputs.ndim == 3:  # -> batch size, time, hidden size, n_vars
-                sparse_weights = torch.ones(
-                    outputs.size(0), outputs.size(1), 1, 1, device=outputs.device
-                )
-            else:  # ndim == 2 -> batch size, hidden size, n_vars
-                sparse_weights = torch.ones(outputs.size(0), 1, 1, device=outputs.device)
+            sparse_weights = self.create_sparse_weights(outputs)
 
         return outputs, sparse_weights

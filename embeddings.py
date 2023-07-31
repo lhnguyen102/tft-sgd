@@ -84,14 +84,18 @@ class MultiEmbedding(nn.Module):
 
     def forward(self, observation: torch.Tensor) -> Dict[str, torch.Tensor]:
         # Precompute indices to avoid repetitive computation
-        indices = {name: self.cat_var_ordering.index(name) for name in self.embeddings.keys()}
+        indices = {
+            name: self.cat_var_ordering.index(name) for name in self.embeddings.keys()
+        }
 
-        input_vectors = {}
+        outputs = {}
         for name, emb in self.embeddings.items():
             if name in self.multi_cat_var:
-                multi_cat_indices = [indices[cat_name] for cat_name in self.multi_cat_var[name]]
-                input_vectors[name] = emb(observation[..., multi_cat_indices])
+                multi_cat_indices = [
+                    indices[cat_name] for cat_name in self.multi_cat_var[name]
+                ]
+                outputs[name] = emb(observation[..., multi_cat_indices])
             else:
-                input_vectors[name] = emb(observation[..., indices[name]])
+                outputs[name] = emb(observation[..., indices[name]])
 
-        return input_vectors
+        return outputs

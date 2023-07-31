@@ -38,6 +38,7 @@ class TFTConfig:
     cont_normalizing_method: Union[Dict[str, str], None] = None
     cat_encoding_method: Union[Dict[str, str], None] = None
     cont_transform_method: Union[Dict[str, str], None] = None
+    device: str = "cpu"
 
     # Post user-specified variables. This is done after the initialization
     cont_var: List[str] = field(default_factory=list)
@@ -50,7 +51,9 @@ class TFTConfig:
         user-specifying the inputs"""
         self.cont_var = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
+                self.time_varying_cont_decoder
+                + self.time_varying_cont_encoder
+                + self.static_conts
             )
         )
         self.cat_var = list(
@@ -68,17 +71,34 @@ class TFTConfig:
 
         # Get default methods for encoding and normalization methods for each data variables.
         # Support incompleted user-specified inputs.
-        if self.cat_encoding_method is None or len(self.cat_encoding_method) < len(self.cat_var):
+        if self.cat_encoding_method is None or len(self.cat_encoding_method) < len(
+            self.cat_var
+        ):
             self.cat_encoding_method = self._default_cat_encoding_method()
 
-        if self.cont_normalizing_method is None or len(self.cont_normalizing_method) < len(
-            self.cont_var
-        ):
+        if self.cont_normalizing_method is None or len(
+            self.cont_normalizing_method
+        ) < len(self.cont_var):
             self.cont_normalizing_method = self._default_cont_normalizer()
 
         # Get default methods for transformations
         if self.cont_transform_method is None:
             self.cont_transform_method = self._default_cont_transformation()
+
+    @property
+    def static_vars(self) -> List[str]:
+        """Static variables"""
+        return self.static_cats + self.static_conts
+
+    @property
+    def time_varying_encoder_vars(self) -> List[str]:
+        """Time varying encoder variables"""
+        return self.time_varying_cat_encoder + self.time_varying_cont_encoder
+
+    @property
+    def time_varying_decoder_vars(self) -> List[str]:
+        """Time varying decoder variables"""
+        return self.time_varying_cat_decoder + self.time_varying_cont_decoder
 
     def _get_cat_var_ordering(self) -> Dict[str, int]:
         """Get all categorical variables including multi-categorical variables.
@@ -113,7 +133,9 @@ class TFTConfig:
         different network in TFT"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
+                self.time_varying_cont_decoder
+                + self.time_varying_cont_encoder
+                + self.static_conts
             )
         )
         cont_var_ordering: Dict[str, int] = {}
@@ -134,7 +156,9 @@ class TFTConfig:
             )
         )
         cat_encoding_method = (
-            self.cat_encoding_method.copy() if self.cat_encoding_method is not None else {}
+            self.cat_encoding_method.copy()
+            if self.cat_encoding_method is not None
+            else {}
         )
         for var in cat_vars:
             if var not in cat_encoding_method:
@@ -147,11 +171,15 @@ class TFTConfig:
 
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
+                self.time_varying_cont_decoder
+                + self.time_varying_cont_encoder
+                + self.static_conts
             )
         )
         cont_normalizing_method = (
-            self.cont_normalizing_method.copy() if self.cont_normalizing_method is not None else {}
+            self.cont_normalizing_method.copy()
+            if self.cont_normalizing_method is not None
+            else {}
         )
         for var in cont_vars:
             if var not in cont_normalizing_method:
@@ -163,11 +191,15 @@ class TFTConfig:
         """Initalize the transformation method fo each continous variables.Default to None"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
+                self.time_varying_cont_decoder
+                + self.time_varying_cont_encoder
+                + self.static_conts
             )
         )
         cont_transform_method = (
-            self.cont_transform_method.copy() if self.cont_transform_method is not None else {}
+            self.cont_transform_method.copy()
+            if self.cont_transform_method is not None
+            else {}
         )
         for var in cont_vars:
             if var not in cont_transform_method:

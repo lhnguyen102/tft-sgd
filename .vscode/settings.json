@@ -1,7 +1,4 @@
 {
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
     "python.linting.pylintArgs": [
         "--generated-members=torch.*,nn.*",
         "--ignored-modules=torch",
@@ -14,8 +11,13 @@
         100
     ],
     "editor.trimAutoWhitespace": true,
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    },
     "python.formatting.blackArgs": [
-        "--line-length",
+        "--max-line-length",
         "100"
-    ]
+    ],
+    "json.validate.enable": false,
+    "workbench.settings.openDefaultSettings": false
 }
