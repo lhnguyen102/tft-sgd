@@ -1,5 +1,9 @@
 from dataclasses import dataclass, field
-from typing import Union, Dict, Tuple, List
+from typing import Union, Dict, List
+
+
+def empty_dict():
+    return {}
 
 
 @dataclass
@@ -10,17 +14,18 @@ class TFTConfig:
     # max_embedding_size: int
     # seq_len: int
     num_targets: int = 1
-    batch_size: int = 8
+    batch_size: int = 5
     output_size: Union[List[int], int] = 7  # number of quantiles
     hidden_size: int = 16
     num_lstm_layers: int = 1
     num_attn_head_size: int = 4
     dropout: float = 0.1
     embedding_sizes: Union[Dict[str, Dict[str, int]], None] = None
-    hidden_cont_sizes: Union[Dict[str, int], None] = None
+    hidden_cont_sizes: Dict[str, int] = field(default_factory=empty_dict)
     hidden_cont_size: int = 8  # default
     decoder_len: int = 24
     encoder_len: int = 168
+    lr: float = 0.001
 
     # Data variables
     target_var: List[str] = field(default_factory=list)
@@ -31,7 +36,7 @@ class TFTConfig:
     time_varying_cont_decoder: List[str] = field(default_factory=list)
     static_conts: List[str] = field(default_factory=list)
     static_cats: List[str] = field(default_factory=list)
-    multi_cat_var: Union[Dict[str, List[str]], None] = None
+    multi_cat_var: Dict[str, List[str]] = field(default_factory=empty_dict)
     is_single_var_grns_shared: bool = False
     forecast_freq: float = 3600
 
@@ -51,9 +56,7 @@ class TFTConfig:
         user-specifying the inputs"""
         self.cont_var = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder
-                + self.time_varying_cont_encoder
-                + self.static_conts
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         self.cat_var = list(
@@ -71,14 +74,12 @@ class TFTConfig:
 
         # Get default methods for encoding and normalization methods for each data variables.
         # Support incompleted user-specified inputs.
-        if self.cat_encoding_method is None or len(self.cat_encoding_method) < len(
-            self.cat_var
-        ):
+        if self.cat_encoding_method is None or len(self.cat_encoding_method) < len(self.cat_var):
             self.cat_encoding_method = self._default_cat_encoding_method()
 
-        if self.cont_normalizing_method is None or len(
-            self.cont_normalizing_method
-        ) < len(self.cont_var):
+        if self.cont_normalizing_method is None or len(self.cont_normalizing_method) < len(
+            self.cont_var
+        ):
             self.cont_normalizing_method = self._default_cont_normalizer()
 
         # Get default methods for transformations
@@ -100,6 +101,12 @@ class TFTConfig:
         """Time varying decoder variables"""
         return self.time_varying_cat_decoder + self.time_varying_cont_decoder
 
+    @property
+    def seq_len(self) -> int:
+        """Sequence length"""
+
+        return self.encoder_len + self.decoder_len
+
     def _get_cat_var_ordering(self) -> Dict[str, int]:
         """Get all categorical variables including multi-categorical variables.
         The ordering of categorical variable list will be the same with the data frame
@@ -117,10 +124,7 @@ class TFTConfig:
         )
         cat_var_cols = []
         for var in cat_vars:
-            if var in self.multi_cat_var:
-                cat_var_cols.extend(self.multi_cat_var[var])
-            else:
-                cat_var_cols.append(var)
+            cat_var_cols.extend(self.multi_cat_var.get(var, []) if self.multi_cat_var else [var])
 
         cat_var_ordering: Dict[str, int] = {}
         for i, var in enumerate(cat_var_cols):
@@ -133,9 +137,7 @@ class TFTConfig:
         different network in TFT"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder
-                + self.time_varying_cont_encoder
-                + self.static_conts
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_var_ordering: Dict[str, int] = {}
@@ -156,9 +158,7 @@ class TFTConfig:
             )
         )
         cat_encoding_method = (
-            self.cat_encoding_method.copy()
-            if self.cat_encoding_method is not None
-            else {}
+            self.cat_encoding_method.copy() if self.cat_encoding_method is not None else {}
         )
         for var in cat_vars:
             if var not in cat_encoding_method:
@@ -171,15 +171,11 @@ class TFTConfig:
 
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder
-                + self.time_varying_cont_encoder
-                + self.static_conts
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_normalizing_method = (
-            self.cont_normalizing_method.copy()
-            if self.cont_normalizing_method is not None
-            else {}
+            self.cont_normalizing_method.copy() if self.cont_normalizing_method is not None else {}
         )
         for var in cont_vars:
             if var not in cont_normalizing_method:
@@ -191,15 +187,11 @@ class TFTConfig:
         """Initalize the transformation method fo each continous variables.Default to None"""
         cont_vars = list(
             dict.fromkeys(
-                self.time_varying_cont_decoder
-                + self.time_varying_cont_encoder
-                + self.static_conts
+                self.time_varying_cont_decoder + self.time_varying_cont_encoder + self.static_conts
             )
         )
         cont_transform_method = (
-            self.cont_transform_method.copy()
-            if self.cont_transform_method is not None
-            else {}
+            self.cont_transform_method.copy() if self.cont_transform_method is not None else {}
         )
         for var in cont_vars:
             if var not in cont_transform_method:

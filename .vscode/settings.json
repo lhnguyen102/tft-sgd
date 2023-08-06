@@ -1,23 +1,23 @@
 {
+    "[python]": {
+        "editor.defaultFormatter": "ms-python.black-formatter"
+    }
+    "python.formatting.provider": "black",
     "python.linting.pylintArgs": [
         "--generated-members=torch.*,nn.*",
         "--ignored-modules=torch",
         "--additional-argument=argument_value"
     ],
-    "python.formatting.provider": "none",
     "editor.formatOnSave": true,
     "editor.wordWrap": "off",
     "editor.rulers": [
         100
     ],
     "editor.trimAutoWhitespace": true,
-    "[python]": {
-        "editor.defaultFormatter": "ms-python.black-formatter"
-    },
     "python.formatting.blackArgs": [
-        "--max-line-length",
+        "--line-length",
         "100"
     ],
     "json.validate.enable": false,
-    "workbench.settings.openDefaultSettings": false
+    "workbench.settings.openDefaultSettings": false,
 }

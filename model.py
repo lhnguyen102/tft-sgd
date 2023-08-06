@@ -57,9 +57,7 @@ class TimeDistributedInterpolation(nn.Module):
 
 
 class ResampleNorm(nn.Module):
-    def __init__(
-        self, input_size: int, output_size: int = None, trainable_add: bool = True
-    ):
+    def __init__(self, input_size: int, output_size: int = None, trainable_add: bool = True):
         super().__init__()
 
         self.input_size = input_size
@@ -90,9 +88,7 @@ class ResampleNorm(nn.Module):
 class GatedLinearUnit(nn.Module):
     """Decide how much info should flow through the network"""
 
-    def __init__(
-        self, input_size: int, hidden_size: int = None, dropout: float = None
-    ) -> None:
+    def __init__(self, input_size: int, hidden_size: int = None, dropout: float = None) -> None:
         super().__init__()
 
         if dropout is not None:
@@ -125,9 +121,7 @@ class GatedLinearUnit(nn.Module):
 class AddNorm(nn.Module):
     """Add residual and normalize all values"""
 
-    def __init__(
-        self, input_size: int, skipe_size: int = None, trainable_add: bool = True
-    ) -> None:
+    def __init__(self, input_size: int, skipe_size: int = None, trainable_add: bool = True) -> None:
         super().__init__()
 
         self.input_size = input_size
@@ -242,15 +236,11 @@ class GatedResidualNetwork(nn.Module):
             if "bias" in name:
                 nn.init.zeros_(param)
             elif "linear_1" in name or "linear_2" in name:
-                nn.init.kaiming_normal_(
-                    param, a=0, mode="fan_in", nonlinearity="leaky_relu"
-                )
+                nn.init.kaiming_normal_(param, a=0, mode="fan_in", nonlinearity="leaky_relu")
             elif "context" in name:
                 nn.init.xavier_uniform_(param)
 
-    def forward(
-        self, observation: torch.Tensor, context=None, residual=None
-    ) -> torch.Tensor:
+    def forward(self, observation: torch.Tensor, context=None, residual=None) -> torch.Tensor:
         if residual is None:
             residual = observation
 
@@ -317,13 +307,13 @@ class MultiHeadAttention(nn.Module):
             if mask is not None:
                 attn = attn.masked_fill(mask == 1, float("-inf"))
             attn = self.softmax(attn)
-            head = attn & value
+            head = attn @ value
 
             attns.append(attn)
             heads.append(head)
 
         heads_tensor = torch.stack(heads, dim=2) if self.n_head > 1 else heads[0]
-        attns_tensor = torch.tensor(attns, dim=2)
+        attns_tensor = torch.stack(attns, dim=2)
 
         outputs = torch.mean(heads_tensor, dim=2) if self.n_head > 1 else heads_tensor
         outputs = self.output_proj(outputs)
@@ -424,9 +414,7 @@ class VariableSelectionNetwork(nn.Module):
 
     def create_sparse_weights(self, outputs: torch.Tensor) -> torch.Tensor:
         if outputs.ndim == 3:  # -> batch size, time, hidden size, n_vars
-            return torch.ones(
-                outputs.size(0), outputs.size(1), 1, 1, device=outputs.device
-            )
+            return torch.ones(outputs.size(0), outputs.size(1), 1, 1, device=outputs.device)
         else:  # ndim == 2 -> batch size, hidden size, n_vars
             return torch.ones(outputs.size(0), 1, 1, device=outputs.device)
 

@@ -13,6 +13,19 @@ from embeddings import MultiEmbedding
 from rnn import LSTM
 from config import TFTConfig
 from data_preprocessor import AutoencoderInputBatch
+from dataclasses import dataclass
+
+
+@dataclass
+class TFTOutput:
+    """TFF network's output"""
+
+    prediction: torch.Tensor
+    encoder_attn_weight: torch.Tensor
+    decoder_attn_weight: torch.Tensor
+    static_var_weight: torch.Tensor
+    encoder_var_selection_weight: torch.Tensor
+    decoder_var_selection_weight: torch.Tensor
 
 
 class TemporalFusionTransformer(nn.Module):
@@ -38,15 +51,12 @@ class TemporalFusionTransformer(nn.Module):
         # Prescaler
         self.prescalers = nn.ModuleDict()
         for name in self.cfg.cont_var:
-            output_size = self.cfg.hidden_cont_sizes.get(
-                name, self.cfg.hidden_cont_size
-            )
+            output_size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
             self.prescalers[name] = nn.Linear(1, output_size)
 
         # Variable selection for static variables
         static_input_sizes = {
-            name: self.cfg.embedding_sizes[name]["emb_size"]
-            for name in self.cfg.static_cats
+            name: self.cfg.embedding_sizes[name]["emb_size"] for name in self.cfg.static_cats
         }
         for name in self.cfg.static_conts:
             size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
@@ -99,16 +109,12 @@ class TemporalFusionTransformer(nn.Module):
 
         # Variable selection for encoder
         single_variable_grns = (
-            {}
-            if not self.cfg.is_single_var_grns_shared
-            else self.shared_single_var_grns
+            {} if not self.cfg.is_single_var_grns_shared else self.shared_single_var_grns
         )
         self.encoder_variable_selection = VariableSelectionNetwork(
             input_sizes=encoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={
-                name: True for name in self.cfg.time_varying_cat_encoder
-            },
+            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_encoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,
@@ -119,9 +125,7 @@ class TemporalFusionTransformer(nn.Module):
         self.decoder_variable_selection = VariableSelectionNetwork(
             input_sizes=decoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={
-                name: True for name in self.cfg.time_varying_cat_decoder
-            },
+            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_decoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,
@@ -251,7 +255,7 @@ class TemporalFusionTransformer(nn.Module):
         # Add continous data to hidden states
         hidden_states.update(
             {
-                name: observation.cont_var[..., i]
+                name: observation.cont_var[..., [i]]
                 for name, i in self.cfg.cont_var_ordering.items()
                 if name in self.cfg.cont_var
             }
@@ -259,12 +263,8 @@ class TemporalFusionTransformer(nn.Module):
 
         # We assume that static embedding valuea are constant across time step
         if len(self.cfg.static_vars) > 0:
-            static_emb_input = {
-                name: hidden_states[name][:, 0] for name in self.cfg.static_vars
-            }
-            static_emb, static_var_weight = self.static_variable_selection(
-                static_emb_input
-            )
+            static_emb_input = {name: hidden_states[name][:, 0] for name in self.cfg.static_vars}
+            static_emb, static_var_weight = self.static_variable_selection(static_emb_input)
         else:
             static_emb = torch.zeros(
                 (observation.cont_var.size(0), self.cfg.hidden_size),
@@ -276,9 +276,9 @@ class TemporalFusionTransformer(nn.Module):
             )
 
         # Copy context values for each time step. TODO Could we have context calculated for each step?
-        static_context = self.static_context_variable_selection(static_emb)[
-            :, None
-        ].expand(-1, seq_len, -1)
+        static_context = self.static_context_variable_selection(static_emb)
+
+        static_context = static_context[:, None].expand(-1, seq_len, -1)
 
         # Variable selection for Autoencoder
         time_varying_encoder_input = {
@@ -286,19 +286,20 @@ class TemporalFusionTransformer(nn.Module):
             for name in self.cfg.time_varying_encoder_vars
         }
         time_varying_decoder_input = {
-            name: hidden_states[name][: observation.encoder_len]
+            name: hidden_states[name][:, observation.encoder_len :]
             for name in self.cfg.time_varying_decoder_vars
         }
 
         (
             emb_varying_encoder,
-            emb_varying_encoder_weight,
+            encoder_var_selection_weight,
         ) = self.encoder_variable_selection(
             time_varying_encoder_input, static_context[:, : observation.encoder_len]
         )
+
         (
             emb_varying_decoder,
-            emb_varying_decoder_weight,
+            decoder_var_selection_weight,
         ) = self.decoder_variable_selection(
             time_varying_decoder_input, static_context[:, observation.encoder_len :]
         )
@@ -316,6 +317,7 @@ class TemporalFusionTransformer(nn.Module):
             (init_lstm_hidden, init_lstm_cell),
             enforce_sorted=False,
         )
+
         decoder_output, _ = self.lstm_decoder(
             emb_varying_decoder, (encoder_hidden, encoder_cell), enforce_sorted=False
         )
@@ -329,45 +331,54 @@ class TemporalFusionTransformer(nn.Module):
         ae_output = torch.cat([encoder_output, decoder_output], dim=1)
 
         # Static enrichment
-        static_context_enrichment_output = self.static_context_enrichment(
-            static_emb
-        ).expand(-1, seq_len, -1)
+        static_context_enrichment_output = self.static_context_enrichment(static_emb)
+        static_context_enrichment_output = static_context_enrichment_output[:, None].expand(
+            -1, seq_len, -1
+        )
         attn_input = self.static_enrichment(ae_output, static_context_enrichment_output)
 
         # Attention
         mask = self.get_attention_mask(
-            decoder_len=observation.decoder_len, encoder_len=observation.encoder_len
+            decoder_len=observation.decoder_len,
+            encoder_len=observation.encoder_len,
+            batch_size=self.cfg.batch_size,
         )
         attn_output, attn_weights = self.multihead_attn(
             x_query=attn_input[:, observation.encoder_len :],
             x_key=attn_input,
             x_value=attn_input,
             mask=mask,
-        )  # TODO: Need to write code for masking
+        )
         attn_output = self.post_attn_gate_norm(
             attn_output, attn_input[:, observation.encoder_len :]
         )
         output = self.pos_wise_ff(attn_output)
 
         # Prediction
-        output = self.pre_output_gate_norm(
-            output, ae_output[:, observation.encoder_len :]
-        )
+        output = self.pre_output_gate_norm(output, ae_output[:, observation.encoder_len :])
         if self.cfg.num_targets > 1:  # Multi-target architecture
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
             output = self.output_layer(output)
 
-        # TODO: create a dataclass for output
-        return output
-
-    def get_attention_mask(self, encoder_len: int, decoder_len: int) -> torch.Tensor:
-        """Get masked matrix for attention layer we ensure the temporal dependency are respected"""
-        decoder_masked = torch.triu(
-            torch.ones(decoder_len, decoder_len, device=self.device)
+        return TFTOutput(
+            prediction=output,
+            encoder_attn_weight=attn_weights[..., : observation.encoder_len],
+            decoder_attn_weight=attn_weights[..., observation.encoder_len :],
+            static_var_weight=static_var_weight,
+            encoder_var_selection_weight=encoder_var_selection_weight,
+            decoder_var_selection_weight=decoder_var_selection_weight,
         )
-        encoder_masked = torch.zeros(encoder_len, encoder_len, device=self.device)
-        mask = torch.cat([encoder_masked, decoder_masked], dim=1).expand(
+
+    def get_attention_mask(
+        self, encoder_len: int, decoder_len: int, batch_size: int
+    ) -> torch.Tensor:
+        """Get masked matrix for attention layer we ensure the temporal dependency are respected"""
+        decoder_masked = torch.triu(torch.ones(decoder_len, decoder_len, device=self.device))[
+            None, ...
+        ].expand(batch_size, -1, -1)
+        encoder_masked = torch.zeros(batch_size, encoder_len, device=self.device)[:, None].expand(
             -1, decoder_len, -1
         )
+        mask = torch.cat([encoder_masked, decoder_masked], dim=2)
         return mask

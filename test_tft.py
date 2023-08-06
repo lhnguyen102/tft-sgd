@@ -1,7 +1,11 @@
-from data_preprocessor import Preprocessor
+from data_preprocessor import Preprocessor, TFTDataloader
 from config import TFTConfig
 import pandas as pd
 import numpy as np
+from tft import TemporalFusionTransformer
+import torch
+from torch.optim import Adam
+from torch.nn import MSELoss
 
 
 def load_data_from_txt() -> pd.DataFrame:
@@ -61,6 +65,22 @@ def main():
     # Data preprocessing
     data_prep = Preprocessor(data=raw_df, cfg=cfg)
     data_frame = data_prep.preprocess_data()
+
+    tft_net = TemporalFusionTransformer(cfg)
+    optimizer = Adam(params=tft_net.parameters(), lr=cfg.lr)
+    loss_fn = MSELoss()
+    dataloder = TFTDataloader(cfg=cfg, data=data_frame, shuffle=True)
+
+    losses = []
+    for x_batch, y_batch in dataloder:
+        y_pred = tft_net(x_batch)
+        loss = loss_fn(y_pred.prediction, y_batch.target)
+
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
+
+        losses.append(loss.items())
 
 
 if __name__ == "__main__":
