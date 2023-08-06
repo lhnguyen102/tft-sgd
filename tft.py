@@ -339,9 +339,7 @@ class TemporalFusionTransformer(nn.Module):
 
         # Attention
         mask = self.get_attention_mask(
-            decoder_len=observation.decoder_len,
-            encoder_len=observation.encoder_len,
-            batch_size=self.cfg.batch_size,
+            decoder_len=observation.decoder_len, encoder_len=observation.encoder_len
         )
         attn_output, attn_weights = self.multihead_attn(
             x_query=attn_input[:, observation.encoder_len :],
@@ -360,7 +358,6 @@ class TemporalFusionTransformer(nn.Module):
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
             output = self.output_layer(output)
-
         return TFTOutput(
             prediction=output,
             encoder_attn_weight=attn_weights[..., : observation.encoder_len],
@@ -370,15 +367,9 @@ class TemporalFusionTransformer(nn.Module):
             decoder_var_selection_weight=decoder_var_selection_weight,
         )
 
-    def get_attention_mask(
-        self, encoder_len: int, decoder_len: int, batch_size: int
-    ) -> torch.Tensor:
+    def get_attention_mask(self, encoder_len: int, decoder_len: int) -> torch.Tensor:
         """Get masked matrix for attention layer we ensure the temporal dependency are respected"""
-        decoder_masked = torch.triu(torch.ones(decoder_len, decoder_len, device=self.device))[
-            None, ...
-        ].expand(batch_size, -1, -1)
-        encoder_masked = torch.zeros(batch_size, encoder_len, device=self.device)[:, None].expand(
-            -1, decoder_len, -1
-        )
-        mask = torch.cat([encoder_masked, decoder_masked], dim=2)
+        decoder_masked = torch.triu(torch.ones(1, decoder_len, decoder_len, device=self.device))
+        encoder_masked = torch.zeros(1, 1, encoder_len, device=self.device)
+        mask = torch.cat([encoder_masked.expand(-1, decoder_len, -1), decoder_masked], dim=2)
         return mask

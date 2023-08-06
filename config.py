@@ -18,7 +18,7 @@ class TFTConfig:
     output_size: Union[List[int], int] = 7  # number of quantiles
     hidden_size: int = 16
     num_lstm_layers: int = 1
-    num_attn_head_size: int = 4
+    num_attn_head_size: int = 3
     dropout: float = 0.1
     embedding_sizes: Union[Dict[str, Dict[str, int]], None] = None
     hidden_cont_sizes: Dict[str, int] = field(default_factory=empty_dict)
