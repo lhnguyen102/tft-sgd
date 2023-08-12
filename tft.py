@@ -1,4 +1,5 @@
 from typing import Dict
+import os
 import torch
 import torch.nn as nn
 from model import (
@@ -244,7 +245,7 @@ class TemporalFusionTransformer(nn.Module):
         else:
             self.output_layer = nn.Linear(self.cfg.hidden_size, self.cfg.output_size)
 
-    def forward(self, observation: AutoencoderInputBatch) -> Dict[str, torch.Tensor]:
+    def forward(self, observation: AutoencoderInputBatch) -> TFTOutput:
         """Observation shape must be (batch_size, time step, covariates)"""
         # Sequence length
         seq_len = observation.encoder_len + observation.decoder_len
@@ -358,6 +359,7 @@ class TemporalFusionTransformer(nn.Module):
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
             output = self.output_layer(output)
+
         return TFTOutput(
             prediction=output,
             encoder_attn_weight=attn_weights[..., : observation.encoder_len],
@@ -373,3 +375,38 @@ class TemporalFusionTransformer(nn.Module):
         encoder_masked = torch.zeros(1, 1, encoder_len, device=self.device)
         mask = torch.cat([encoder_masked.expand(-1, decoder_len, -1), decoder_masked], dim=2)
         return mask
+
+
+class TFTModel:
+    """Transformer Temporal Fusion model"""
+
+    def __init__(self, cfg: TFTConfig) -> None:
+        self.cfg = cfg
+        if self.cfg.device == "cuda" and torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
+
+        self.network = TemporalFusionTransformer(cfg)
+        self.network.to(self.device)
+
+    def save(self, model_path: str = "./saved_model", filename: str = "tft_net_dict.pth") -> None:
+        """Save network parameters"""
+        if not os.path.exists(model_path):
+            os.makedirs(model_path)
+
+        self.network.to("cpu")
+        torch.save(self.network.state_dict(), os.path.join(model_path, filename))
+        print(f"Model is saved to {os.path.join(model_path, filename)}")
+        self.network.to(self.device)
+
+    def load(self, model_path: str = "./saved_model", filename: str = "tft_net_dict.pth") -> None:
+        """Load network parameters"""
+        file_path = os.path.join(model_path, filename)
+
+        if not os.path.exists(file_path):
+            print(f"Error: File {file_path} doesn't exist")
+            return
+        self.network.load_state_dict(torch.load(file_path))
+        self.network.to(self.device)
+        print("Model loaded successfully")
