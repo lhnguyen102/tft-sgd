@@ -14,7 +14,8 @@ class TFTConfig:
     # max_embedding_size: int
     # seq_len: int
     num_targets: int = 1
-    batch_size: int = 5
+    num_epochs: int = 2
+    batch_size: int = 64
     output_size: Union[List[int], int] = 7  # number of quantiles
     hidden_size: int = 16
     num_lstm_layers: int = 1
@@ -25,7 +26,7 @@ class TFTConfig:
     hidden_cont_size: int = 8  # default
     decoder_len: int = 24
     encoder_len: int = 168
-    lr: float = 0.001
+    lr: float = 0.003
 
     # Loss params
     quantiles: List[float] = field(default_factory=lambda: [0.02, 0.1, 0.25, 0.5, 0.75, 0.9, 0.98])

@@ -257,7 +257,7 @@ class Visualizer:
 
         # Create the bar plot
         plt.figure(figsize=self.figsize)
-        axe = plt.Axes()
+        axe = plt.axes()
         axe.barh(sorted_names, sorted_scores, color="tab:blue")
         axe.set_xlabel("Feature Importance Score", fontsize=self.fontsize)
         plt.title(f"Feature Importance for {var_type}")

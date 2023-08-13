@@ -83,8 +83,8 @@ class TFTDataloader:
                 torch.tensor(
                     self.data.iloc[start_seq_idx + self.cfg.encoder_len : end_seq_idx][
                         self.cfg.target_var
-                    ].to_numpy(dtype=np.int64),
-                    dtype=torch.int64,
+                    ].to_numpy(dtype=np.float32),
+                    dtype=torch.float32,
                 )
             )
         input_batch = AutoencoderInputBatch(
@@ -414,8 +414,8 @@ class TimeseriesEncoderNormalizer:
 
         cont_data_denormalized = cont_data.copy()
         for name, normalizer in self.cont_normalizers.items():
-            inverse_values = self.cont_transfom_fn[name].inverse(cont_data[name.values])
-            cont_data_denormalized[name] = normalizer.inverse_transform(inverse_values)
+            denom_values = normalizer.inverse_transform(cont_data[name].values)
+            cont_data_denormalized[name] = self.cont_transfom_fn[name].inverse(denom_values)
 
         return cont_data_denormalized
 
@@ -478,9 +478,7 @@ class Preprocessor:
 
             # Construcuted time index
             tmp = self._construct_time_idx(
-                data_frame=tmp,
-                forecast_freq=self.cfg.forecast_freq,
-                delta_time=delta_time,
+                data_frame=tmp, forecast_freq=self.cfg.forecast_freq, delta_time=delta_time
             )
 
             # Add time feature
@@ -516,6 +514,9 @@ class Preprocessor:
         # Update data frame
         merged_df.update(cat_df)
         merged_df.update(norm_df)
+
+        # TODO: Find a better solution to deal with missing data
+        merged_df.fillna(0.0, inplace=True)
 
         return merged_df
 
@@ -660,3 +661,19 @@ class Preprocessor:
         filled_df = filled_df[active_dt_range].fillna(0.0)
 
         return filled_df
+
+    @staticmethod
+    def split_data(
+        data_frame: pd.DataFrame, train_ratio: float = 0.8, val_ratio: float = 0.1
+    ) -> dict:
+        """Split data frame into train, validation, and test sets"""
+
+        return dict(
+            train=data_frame.iloc[: int(train_ratio * len(data_frame))],
+            val=data_frame.iloc[
+                int(train_ratio * len(data_frame)) : int(
+                    (train_ratio + val_ratio) * len(data_frame)
+                )
+            ],
+            test=data_frame.iloc[int((train_ratio + val_ratio) * len(data_frame)) :],
+        )
