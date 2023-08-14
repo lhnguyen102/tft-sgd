@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+from torch.utils.data import Dataset
 
 from config import TFTConfig
 
@@ -26,6 +27,89 @@ class TFTTargetBatch:
     target: torch.Tensor = None
 
 
+from torch.utils.data import Dataset
+
+
+def custom_collate_fn(batch: List[Tuple[AutoencoderInputBatch, TFTTargetBatch]]):
+    cont_var = torch.stack([sample[0].cont_var for sample in batch])
+    target = torch.stack([sample[1].target for sample in batch])
+
+    # Only stack cat_var if the first item has it
+    cat_var = (
+        torch.stack([sample[0].cat_var for sample in batch])
+        if batch[0][0].cat_var is not None
+        else None
+    )
+
+    input_batch = AutoencoderInputBatch(
+        cont_var=cont_var,
+        cat_var=cat_var,
+        encoder_len=batch[0][0].encoder_len,
+        decoder_len=batch[0][0].decoder_len,
+    )
+    output_batch = TFTTargetBatch(target=target)
+
+    return input_batch, output_batch
+
+
+class TFTDataset(Dataset):
+    """Custom dataset for time series"""
+
+    def __init__(self, data: pd.DataFrame, cfg: TFTConfig) -> None:
+        self.cfg = cfg
+        self.indices = np.arange(len(data) - self.cfg.seq_len).tolist()
+
+        # Convert DataFrame columns into tensors
+        self.cont_tensor = torch.tensor(data[self.cfg.cont_var].to_numpy(dtype=np.float32)).float()
+
+        # Check for categorical variables during initialization
+        self.has_cat_var = bool(self.cfg.cat_var)
+        if self.has_cat_var:
+            self.cat_tensor = torch.tensor(data[self.cfg.cat_var].to_numpy(dtype=np.int64)).long()
+        else:
+            self.cat_tensor = None
+
+        self.target_tensor = torch.tensor(
+            data[self.cfg.target_var].to_numpy(dtype=np.float32)
+        ).float()
+
+        if self.cfg.device == "cuda" and torch.cuda.is_available():
+            self.device = torch.device("cuda")
+            self.cont_tensor = self.cont_tensor.to(self.device)
+            self.target_tensor = self.target_tensor.to(self.device)
+            if self.has_cat_var:
+                self.cat_tensor = self.cat_tensor.to(self.device)
+        else:
+            self.device = torch.device("cpu")
+
+        # Store start and end sequence indices from the DataFrame
+        self.start_seq_indices = data["start_seq_idx"].tolist()
+        self.end_seq_indices = data["end_seq_idx"].tolist()
+
+    def __len__(self) -> int:
+        return len(self.indices)
+
+    def __getitem__(self, index: int) -> Tuple[AutoencoderInputBatch, TFTTargetBatch]:
+        i = self.indices[index]
+
+        start_seq_idx = self.start_seq_indices[index]
+        end_seq_idx = self.end_seq_indices[index]
+
+        cont_data = self.cont_tensor[start_seq_idx:end_seq_idx]
+        cat_data = self.cat_tensor[start_seq_idx:end_seq_idx] if self.has_cat_var else None
+        target_data = self.target_tensor[start_seq_idx + self.cfg.encoder_len : end_seq_idx]
+
+        input_sample = AutoencoderInputBatch(
+            cont_var=cont_data,
+            cat_var=cat_data,
+            encoder_len=self.cfg.encoder_len,
+            decoder_len=self.cfg.decoder_len,
+        )
+        output_sample = TFTTargetBatch(target=target_data)
+
+        return input_sample, output_sample
+
+
 class TFTDataloader:
     """Custom dataloader for time series"""
 
@@ -35,6 +119,10 @@ class TFTDataloader:
         self.shuffle = shuffle
         self.indices = np.arange(len(self.data) - self.cfg.seq_len).tolist()
         self.num_samples = 0
+        if self.cfg.device == "cuda" and torch.cuda.is_available():
+            self.device = torch.device("cuda")
+        else:
+            self.device = torch.device("cpu")
 
     def reshuffle(self):
         """Reshuffle indices"""
@@ -88,12 +176,12 @@ class TFTDataloader:
                 )
             )
         input_batch = AutoencoderInputBatch(
-            cont_var=torch.stack(cont_batches),
-            cat_var=torch.stack(cat_batches),
+            cont_var=torch.stack(cont_batches).to(self.device),
+            cat_var=torch.stack(cat_batches).to(self.device),
             encoder_len=self.cfg.encoder_len,
             decoder_len=self.cfg.decoder_len,
         )
-        output_batch = TFTTargetBatch(target=torch.stack(target_batches))
+        output_batch = TFTTargetBatch(target=torch.stack(target_batches).to(self.device))
 
         return input_batch, output_batch
 
@@ -664,16 +752,60 @@ class Preprocessor:
 
     @staticmethod
     def split_data(
-        data_frame: pd.DataFrame, train_ratio: float = 0.8, val_ratio: float = 0.1
+        data_frame: pd.DataFrame,
+        total_seq_len: int,
+        train_ratio: float = 0.8,
+        val_ratio: float = 0.1,
     ) -> dict:
         """Split data frame into train, validation, and test sets"""
 
-        return dict(
-            train=data_frame.iloc[: int(train_ratio * len(data_frame))],
-            val=data_frame.iloc[
-                int(train_ratio * len(data_frame)) : int(
-                    (train_ratio + val_ratio) * len(data_frame)
-                )
-            ],
-            test=data_frame.iloc[int((train_ratio + val_ratio) * len(data_frame)) :],
-        )
+        train_sets = []
+        val_sets = []
+        test_sets = []
+        train_start_point = 0
+        val_start_point = 0
+        test_start_point = 0
+        for _, group in data_frame.groupby("data_id"):
+            group_len = len(group)
+
+            if group_len < total_seq_len:
+                continue
+
+            num_seq = group_len // total_seq_len
+
+            num_train_seq = int(train_ratio * num_seq)
+            num_val_seq = int(val_ratio * num_seq)
+
+            train_rows = num_train_seq * total_seq_len
+            val_rows = num_val_seq * total_seq_len
+
+            train_set = group.iloc[:train_rows]
+            val_set = group.iloc[train_rows : train_rows + val_rows]
+            test_set = group.iloc[train_rows + val_rows :]
+
+            # Adding encoder and decoder sequence indices
+            train_set = Preprocessor.add_sequence_index(
+                data_frame=train_set, seq_len=total_seq_len, start_point=train_start_point
+            )
+            val_set = Preprocessor.add_sequence_index(
+                data_frame=val_set, seq_len=total_seq_len, start_point=val_start_point
+            )
+            test_set = Preprocessor.add_sequence_index(
+                data_frame=test_set, seq_len=total_seq_len, start_point=test_start_point
+            )
+
+            # Update start point
+            train_start_point += len(train_set)
+            val_start_point += len(val_set)
+            test_start_point += len(test_set)
+
+            train_sets.append(train_set)
+            val_sets.append(val_set)
+            test_sets.append(test_set)
+
+        # Concatenate data for each set
+        train_df = pd.concat(train_sets)
+        val_df = pd.concat(val_sets)
+        test_df = pd.concat(test_sets)
+
+        return dict(train=train_df, val=val_df, test=test_df)

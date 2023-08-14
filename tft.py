@@ -11,7 +11,6 @@ from model import (
     GateAddNorm,
 )
 from embeddings import MultiEmbedding
-from rnn import LSTM
 from config import TFTConfig
 from data_preprocessor import AutoencoderInputBatch
 from dataclasses import dataclass
@@ -167,7 +166,7 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # Encoder-Decoder LSTM
-        self.lstm_encoder = LSTM(
+        self.lstm_encoder = torch.nn.LSTM(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
             num_layers=self.cfg.num_lstm_layers,
@@ -175,7 +174,7 @@ class TemporalFusionTransformer(nn.Module):
             batch_first=True,
         )
 
-        self.lstm_decoder = LSTM(
+        self.lstm_decoder = torch.nn.LSTM(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
             num_layers=self.cfg.num_lstm_layers,
@@ -314,14 +313,10 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         encoder_output, (encoder_hidden, encoder_cell) = self.lstm_encoder(
-            emb_varying_encoder,
-            (init_lstm_hidden, init_lstm_cell),
-            enforce_sorted=False,
+            emb_varying_encoder, (init_lstm_hidden, init_lstm_cell)
         )
 
-        decoder_output, _ = self.lstm_decoder(
-            emb_varying_decoder, (encoder_hidden, encoder_cell), enforce_sorted=False
-        )
+        decoder_output, _ = self.lstm_decoder(emb_varying_decoder, (encoder_hidden, encoder_cell))
 
         encoder_output = self.post_gate_encoder(encoder_output)
         encoder_output = self.post_add_norm_encoder(encoder_output, emb_varying_encoder)

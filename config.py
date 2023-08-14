@@ -47,7 +47,7 @@ class TFTConfig:
     cont_normalizing_method: Union[Dict[str, str], None] = None
     cat_encoding_method: Union[Dict[str, str], None] = None
     cont_transform_method: Union[Dict[str, str], None] = None
-    device: str = "cpu"
+    device: str = "cuda"
 
     # Post user-specified variables. This is done after the initialization
     cont_var: List[str] = field(default_factory=list)

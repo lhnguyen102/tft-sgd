@@ -1,13 +1,21 @@
 from typing import List
+
 import numpy as np
 import pandas as pd
 import torch
 from torch.optim import Adam
+from torch.utils.data import DataLoader
+from tqdm import tqdm
 
 from config import TFTConfig
-from data_preprocessor import Preprocessor, TFTDataloader, TimeseriesEncoderNormalizer
+from data_preprocessor import (
+    Preprocessor,
+    TFTDataset,
+    TimeseriesEncoderNormalizer,
+    custom_collate_fn,
+)
 from metric import QuantileLoss
-from tft import TFTModel, TFTOutput, TemporalFusionTransformer
+from tft import TemporalFusionTransformer, TFTModel, TFTOutput
 from tft_interp import TFTInterpreter, Visualizer
 
 
@@ -96,7 +104,7 @@ def interpret_prediction(pred: TFTOutput, cfg: TFTConfig, target: torch.Tensor) 
 
 
 def validate(
-    dataloader: TFTDataloader, network: TemporalFusionTransformer, loss_fn: QuantileLoss
+    dataloader: DataLoader, network: TemporalFusionTransformer, loss_fn: QuantileLoss
 ) -> float:
     """Validate model"""
 
@@ -148,7 +156,7 @@ def denormalize_target(
 
 def main():
     """Test data preprocessor"""
-    # # Load raw data
+    # Load raw data
     raw_df = load_data_from_txt()
 
     # Config
@@ -165,23 +173,37 @@ def main():
     # Data preprocessing
     data_prep = Preprocessor(data=raw_df, cfg=cfg)
     data_frame = data_prep.preprocess_data()
-    data_frame = data_frame[:5000]
 
-    # TODO: need to select validation set includeing a full the sequence
-    split_data_frame = data_prep.split_data(data_frame)
+    # Split data into training, validatio, and test sets
+    split_data_frame = data_prep.split_data(
+        data_frame=data_frame, total_seq_len=cfg.encoder_len + cfg.decoder_len
+    )
 
     tft_model = TFTModel(cfg)
     optimizer = Adam(params=tft_model.network.parameters(), lr=cfg.lr)
     loss_fn = QuantileLoss(cfg.quantiles)
-    dataloader = TFTDataloader(cfg=cfg, data=split_data_frame["train"], shuffle=True)
-    val_dataloader = TFTDataloader(cfg=cfg, data=split_data_frame["val"], shuffle=False)
-    test_dataloader = TFTDataloader(cfg=cfg, data=split_data_frame["test"], shuffle=False)
+
+    # Dataloader
+    train_dataset = TFTDataset(cfg=cfg, data=split_data_frame["train"])
+    val_dataset = TFTDataset(cfg=cfg, data=split_data_frame["val"])
+    test_dataset = TFTDataset(cfg=cfg, data=split_data_frame["test"])
+    dataloader = DataLoader(
+        train_dataset, batch_size=cfg.batch_size, shuffle=True, collate_fn=custom_collate_fn
+    )
+    val_dataloader = DataLoader(
+        val_dataset, batch_size=cfg.batch_size, collate_fn=custom_collate_fn
+    )
+    test_dataloader = DataLoader(
+        test_dataset, batch_size=cfg.batch_size, collate_fn=custom_collate_fn
+    )
 
     # Training
     best_val_loss = np.inf
     for e in range(cfg.num_epochs):
         losses = []
-        for x_batch, y_batch in dataloader:
+        for i, (x_batch, y_batch) in tqdm(
+            enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
+        ):
             pred = tft_model.network(x_batch)
             loss = loss_fn(pred.prediction, y_batch.target)
 
@@ -194,17 +216,16 @@ def main():
                 raise ValueError("Loss is NAN")
         avg_train_loss = sum(losses) / len(losses)
 
-        # # Validate
-        # avg_val_loss = validate(
-        #     dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn
-        # )
-        avg_val_loss = 0.0
-        print(
-            f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss.item():.4f} | Val loss: {avg_val_loss: .4f}"
+        # Validate
+        avg_val_loss = validate(
+            dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn
         )
-        # if avg_val_loss < best_val_loss:
-        #     best_val_loss = avg_val_loss
-        #     tft_model.save()
+        print(
+            f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
+        )
+        if avg_val_loss < best_val_loss:
+            best_val_loss = avg_val_loss
+            tft_model.save()
 
     # Testing
     for x_batch, y_batch in test_dataloader:
