@@ -33,6 +33,7 @@ from torch.utils.data import Dataset
 def custom_collate_fn(batch: List[Tuple[AutoencoderInputBatch, TFTTargetBatch]]):
     cont_var = torch.stack([sample[0].cont_var for sample in batch])
     target = torch.stack([sample[1].target for sample in batch])
+    index_batch = [sample[2] for sample in batch]
 
     # Only stack cat_var if the first item has it
     cat_var = (
@@ -49,7 +50,7 @@ def custom_collate_fn(batch: List[Tuple[AutoencoderInputBatch, TFTTargetBatch]])
     )
     output_batch = TFTTargetBatch(target=target)
 
-    return input_batch, output_batch
+    return input_batch, output_batch, index_batch
 
 
 class TFTDataset(Dataset):
@@ -90,8 +91,6 @@ class TFTDataset(Dataset):
         return len(self.indices)
 
     def __getitem__(self, index: int) -> Tuple[AutoencoderInputBatch, TFTTargetBatch]:
-        i = self.indices[index]
-
         start_seq_idx = self.start_seq_indices[index]
         end_seq_idx = self.end_seq_indices[index]
 
@@ -107,11 +106,15 @@ class TFTDataset(Dataset):
         )
         output_sample = TFTTargetBatch(target=target_data)
 
-        return input_sample, output_sample
+        return input_sample, output_sample, index
 
 
 class TFTDataloader:
-    """Custom dataloader for time series"""
+    """Custom dataloader for time series.
+    NOTE: This is example how to implement a custom dataloader independent from Pytorch. For
+    imporving the training perforamnce, we use the built-in Pytorch dataloader instead in this
+    custom dataloader.
+    """
 
     def __init__(self, data: pd.DataFrame, cfg: TFTConfig, shuffle: bool = False) -> None:
         self.data = data
@@ -368,8 +371,8 @@ class MultiLabelEncoder:
 
 
 class TimeseriesEncoderNormalizer:
-    """This class is responsible for encoding the categorical variables and normalizing the
-    continous variables. It also provide a decoding and denormalizing those variables"""
+    """This class encodes categorical variables, normalizes continuous variables,
+    and provides all methods to decode and denormalize them"""
 
     def __init__(
         self,
@@ -804,8 +807,8 @@ class Preprocessor:
             test_sets.append(test_set)
 
         # Concatenate data for each set
-        train_df = pd.concat(train_sets)
-        val_df = pd.concat(val_sets)
-        test_df = pd.concat(test_sets)
+        train_df = pd.concat(train_sets).reset_index(drop=True)
+        val_df = pd.concat(val_sets).reset_index(drop=True)
+        test_df = pd.concat(test_sets).reset_index(drop=True)
 
         return dict(train=train_df, val=val_df, test=test_df)

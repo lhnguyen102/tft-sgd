@@ -24,13 +24,13 @@ class TFTInterpreter:
         attn_score[attn_score < attn_min] = float("nan")
 
         # Variable selection for each timestep
-        assert prediction.encoder_var_selection_weight.size(-2) == 1, "3rd dimension must be 1"
-        assert prediction.decoder_var_selection_weight.size(-2) == 1, "3rd dimension must be 1"
+        assert prediction.encoder_var_weight.size(-2) == 1, "3rd dimension must be 1"
+        assert prediction.decoder_var_weight.size(-2) == 1, "3rd dimension must be 1"
         encoder_var_score = (
-            prediction.encoder_var_selection_weight.squeeze(-2).sum(dim=1) / self.cfg.encoder_len
+            prediction.encoder_var_weight.squeeze(-2).sum(dim=1) / self.cfg.encoder_len
         )
         decoder_var_score = (
-            prediction.decoder_var_selection_weight.squeeze(-2).sum(dim=1) / self.cfg.decoder_len
+            prediction.decoder_var_weight.squeeze(-2).sum(dim=1) / self.cfg.decoder_len
         )
         static_var_score = prediction.static_var_weight.squeeze(1)
 
@@ -69,16 +69,53 @@ class Visualizer:
     def __init__(
         self,
         figsize: tuple = (12, 6),
-        lw: float = 1,
+        lw: float = 2,
         fontsize: float = 12,
         ndiv_x: int = 5,
-        ndiv_y: int = 3,
+        ndiv_y: int = 4,
     ) -> None:
         self.figsize = figsize
         self.lw = lw
         self.fontsize = fontsize
         self.ndiv_x = ndiv_x
         self.ndiv_y = ndiv_y
+
+    def plot_attn_score_heat_map(
+        self,
+        x_heat: np.ndarray,
+        attn_score: np.ndarray,
+        filename: str = "heat_map_attention_score",
+        saved_dir: Union[str, None] = "./figure",
+    ) -> None:
+        """Visualize attention score through heat map"""
+
+        fig = plt.figure(figsize=self.figsize)
+        ax = plt.axes()
+        cax = ax.imshow(attn_score, cmap="plasma", aspect="auto")
+        fig.colorbar(cax, ax=ax)
+
+        # x axis
+        x_tick_labels = np.linspace(x_heat.min(), x_heat.max(), num=self.ndiv_x, endpoint=True)
+        x_positions = np.linspace(0, attn_score.shape[1], self.ndiv_x, endpoint=True)
+        ax.set_xticks(x_positions)
+        ax.set_xticklabels(x_tick_labels.astype(int))
+
+        # y axis
+        y_positions = np.linspace(1, attn_score.shape[0] + 1, self.ndiv_y, endpoint=True)
+        ax.set_yticks(y_positions)
+        ax.set_yticklabels(y_positions.astype(int))
+        ax.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
+
+        ax.set_title("Heat Map Attention Score")
+        # Save figure
+        if saved_dir is not None:
+            os.makedirs(saved_dir, exist_ok=True)
+            saving_path = f"{saved_dir}/{filename}.png"
+            plt.savefig(saving_path, bbox_inches="tight")
+            plt.close()
+            print(f"Figure {filename} saved at {saved_dir}")
+        else:
+            plt.show()
 
     def plot_prediction(
         self,
@@ -96,7 +133,7 @@ class Visualizer:
         fig, ax = plt.subplots(figsize=self.figsize)
 
         # Plot prediction
-        ax.plot(x_pred, pred_val, lw=self.lw, color="black", label="Prediction")
+        ax.plot(x_pred, pred_val, lw=self.lw, color="tab:blue", label="Prediction")
 
         # Plot uncertainty bounds if they exist
         if pred_low is not None and pred_high is not None:
@@ -112,7 +149,13 @@ class Visualizer:
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.2f}".format(x)))
 
         # Setting y-ticks for ax1
-        y_vals_combined = pred_val if x_actual is None else np.concatenate([pred_val, actual_val])
+        y_vals_combined = (
+            np.concatenate([pred_high, pred_low, pred_val])
+            if x_actual is None
+            else np.concatenate([pred_high, pred_low, pred_val, actual_val])
+        )
+        max_y_vals = y_vals_combined.max()
+        min_y_vals = y_vals_combined.min()
         y_ticks = np.linspace(y_vals_combined.min(), y_vals_combined.max(), self.ndiv_y)
         ax.set_yticks(y_ticks)
 
@@ -122,7 +165,14 @@ class Visualizer:
         x_ticks = np.unique(np.round(x_ticks))
         ax.set_xticks(x_ticks)
         ax.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
-        ax.set_ylim([y_vals_combined.min(), y_vals_combined.max()])
+        ax.set_ylim([min_y_vals, max_y_vals])
+        ax.plot(
+            [x_pred[0], x_pred[0]],
+            [min_y_vals, max_y_vals],
+            color="black",
+            linestyle="--",
+            lw=self.lw,
+        )
 
         ax.legend(
             loc="best", edgecolor="black", fontsize=0.9 * self.fontsize, ncol=2, framealpha=0.3
@@ -135,6 +185,7 @@ class Visualizer:
             saving_path = f"{saved_dir}/{filename}.png"
             plt.savefig(saving_path, bbox_inches="tight")
             plt.close()
+            print(f"Figure {filename} saved at {saved_dir}")
         else:
             plt.show()
 
@@ -146,6 +197,7 @@ class Visualizer:
         pred_val: np.ndarray,
         x_attn: np.ndarray,
         attn_score: np.ndarray,
+        horizon_idx: int,
         x_actual: Union[np.ndarray, None] = None,
         actual_val: Union[np.ndarray, None] = None,
         filename: str = "attention_score",
@@ -166,7 +218,7 @@ class Visualizer:
 
         # If actual values are provided, plot them on the same axis
         if x_actual is not None and actual_val is not None:
-            ax1.plot(x_actual, actual_val, color="tab:green", lw=self.lw, label="Actual")
+            ax1.plot(x_actual, actual_val, color="tab:red", lw=self.lw, label="Actual")
 
         # Set number after comma
         ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.2f}".format(x)))
@@ -186,18 +238,18 @@ class Visualizer:
 
         # Create a second y-axis for attention scores
         ax2 = ax1.twinx()
-        ax2.set_ylabel("Attention Score", color="tab:red", fontsize=self.fontsize)
-        ax2.plot(x_attn, attn_score, color="tab:red", lw=self.lw, label="Attention Score")
+        ax2.set_ylabel("Attention Score", color="black", fontsize=self.fontsize)
+        ax2.plot(x_attn, attn_score, color="grey", lw=self.lw, label="Attention Score")
         ax2.plot(
             [x_pred[0], x_pred[0]],
             [attn_score.min(), attn_score.max()],
             color="black",
             linestyle="--",
-            lw=2 * self.lw,
+            lw=self.lw,
         )
         ax2.tick_params(
             axis="y",
-            labelcolor="tab:red",
+            labelcolor="black",
             which="both",
             direction="inout",
             labelsize=self.fontsize,
@@ -228,7 +280,7 @@ class Visualizer:
         )
 
         # Show the plot
-        plt.title("Prediction with Attention Scores")
+        plt.title(f"Prediction with Attention Scores - horizon {horizon_idx}")
         fig.tight_layout()
 
         # Save figure
@@ -237,6 +289,7 @@ class Visualizer:
             saving_path = f"{saved_dir}/{filename}.png"
             plt.savefig(saving_path, bbox_inches="tight")
             plt.close()
+            print(f"Figure {filename} saved at {saved_dir}")
         else:
             plt.show()
 
@@ -270,5 +323,6 @@ class Visualizer:
             saving_path = f"{saved_dir}/{filename}.png"
             plt.savefig(saving_path, bbox_inches="tight")
             plt.close()
+            print(f"Figure {filename} saved at {saved_dir}")
         else:
             plt.show()

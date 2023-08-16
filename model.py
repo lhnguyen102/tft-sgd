@@ -1,8 +1,85 @@
-from typing import Dict, Tuple
+import math
+from typing import Dict, List, Tuple, Union
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+
+
+class TemporalEmbeddingBag(nn.EmbeddingBag):
+    """
+    A class that extends nn.EmbeddingBag to support an additional time dimension in the input data.
+    It reshapes the input data, applies the nn.EmbeddingBag layer, and then reshapes the output.
+    """
+
+    def __init__(self, *args, batch_first: bool = False, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.batch_first = batch_first
+
+    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+        if len(observation.size()) <= 2:
+            return super().forward(observation)
+
+        # Shape (sample * timesteps, input size)
+        obs_reshape = observation.contiguous().view(-1, observation.size(-1))
+
+        output = super().forward(obs_reshape)
+
+        # Reshape output
+        if self.batch_first:
+            # (sample, timesteps, output_size)
+            output = output.contiguous().view(observation.size(0), -1, output.size(-1))
+        else:
+            # (timestep, samples, output_size)
+            output = output.contiguous().view(-1, observation.size(1), output.size(-1))
+
+        return output
+
+
+class MultiEmbedding(nn.Module):
+    """Embedding layer for categorical variables including groups of categorical variables."""
+
+    def __init__(
+        self,
+        embedding_sizes: Dict[str, Dict[str, int]],
+        cat_var: List[str],
+        cat_var_ordering: Dict[str, int],
+        multi_cat_var: Union[Dict[str, List[str]], None] = None,
+    ) -> None:
+        super().__init__()
+        self.embedding_sizes = embedding_sizes
+        self.cat_var = cat_var
+        self.cat_var_ordering = cat_var_ordering
+        self.multi_cat_var = multi_cat_var
+
+        self.init_embeddings()
+
+    def init_embeddings(self) -> None:
+        self.embeddings = nn.ModuleDict()
+        for name in self.embedding_sizes.keys():
+            num_classes = self.embedding_sizes[name]["num_classes"]
+            embedding_size = self.embedding_sizes[name]["emb_size"]
+
+            if name in self.multi_cat_var:
+                self.embeddings[name] = TemporalEmbeddingBag(
+                    num_classes, embedding_size, mode="sum", batch_first=True
+                )
+            else:
+                self.embeddings[name] = nn.Embedding(num_classes, embedding_size)
+
+    def forward(self, observation: torch.Tensor) -> Dict[str, torch.Tensor]:
+        # Precompute indices to avoid repetitive computation
+        outputs = {}
+        for name, emb in self.embeddings.items():
+            if name in self.multi_cat_var:
+                multi_cat_indices = [
+                    self.cat_var_ordering[cat_name] for cat_name in self.multi_cat_var[name]
+                ]
+                outputs[name] = emb(observation[..., multi_cat_indices])
+            else:
+                outputs[name] = emb(observation[..., self.cat_var_ordering[name]])
+
+        return outputs
 
 
 class TimeDistributedInterpolation(nn.Module):
@@ -36,22 +113,18 @@ class TimeDistributedInterpolation(nn.Module):
         if len(observation.size()) <= 2:
             return self.interpolate(observation)
 
-        # Squash samples and timesteps into a single axis
-        x_reshape = observation.contiguous().view(
-            -1, observation.size(-1)
-        )  # (samples * timesteps, input_size)
+        # Squash samples and timesteps into a single axis (samples * timesteps, input_size)
+        x_reshape = observation.contiguous().view(-1, observation.size(-1))
 
         y_interp = self.interpolate(x_reshape)
 
         # We have to reshape Y
         if self.batch_first:
-            y_interp = y_interp.contiguous().view(
-                observation.size(0), -1, y_interp.size(-1)
-            )  # (samples, timesteps, output_size)
+            # (samples, timesteps, output_size)
+            y_interp = y_interp.contiguous().view(observation.size(0), -1, y_interp.size(-1))
         else:
-            y_interp = y_interp.view(
-                -1, observation.size(1), y_interp.size(-1)
-            )  # (timesteps, samples, output_size)
+            # (timesteps, samples, output_size)
+            y_interp = y_interp.view(-1, observation.size(1), y_interp.size(-1))
 
         return y_interp
 

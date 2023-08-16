@@ -1,19 +1,21 @@
-from typing import Dict
 import os
+from dataclasses import dataclass
+from typing import Dict
+
 import torch
 import torch.nn as nn
-from model import (
-    GatedResidualNetwork,
-    VariableSelectionNetwork,
-    GatedLinearUnit,
-    AddNorm,
-    MultiHeadAttention,
-    GateAddNorm,
-)
-from embeddings import MultiEmbedding
+
 from config import TFTConfig
 from data_preprocessor import AutoencoderInputBatch
-from dataclasses import dataclass
+from model import (
+    AddNorm,
+    GateAddNorm,
+    GatedLinearUnit,
+    GatedResidualNetwork,
+    MultiEmbedding,
+    MultiHeadAttention,
+    VariableSelectionNetwork,
+)
 
 
 @dataclass
@@ -24,8 +26,8 @@ class TFTOutput:
     encoder_attn_weight: torch.Tensor
     decoder_attn_weight: torch.Tensor
     static_var_weight: torch.Tensor
-    encoder_var_selection_weight: torch.Tensor
-    decoder_var_selection_weight: torch.Tensor
+    encoder_var_weight: torch.Tensor
+    decoder_var_weight: torch.Tensor
 
 
 class TemporalFusionTransformer(nn.Module):
@@ -48,7 +50,8 @@ class TemporalFusionTransformer(nn.Module):
             multi_cat_var=self.cfg.multi_cat_var,
         )
 
-        # Prescaler
+        # Prescaler i.e., transform input to transformed space in order to make sure they are in the
+        # save range before feeding to another network
         self.prescalers = nn.ModuleDict()
         for name in self.cfg.cont_var:
             output_size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
@@ -73,17 +76,17 @@ class TemporalFusionTransformer(nn.Module):
         # Input size for encoder and decoder
         encoder_input_sizes = {
             name: self.cfg.embedding_sizes[name]["emb_size"]
-            for name in self.cfg.time_varying_cat_encoder
+            for name in self.cfg.dynamic_cat_encoder
         }
-        for name in self.cfg.time_varying_cont_encoder:
+        for name in self.cfg.dynamic_cont_encoder:
             size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
             encoder_input_sizes[name] = size
 
         decoder_input_sizes = {
             name: self.cfg.embedding_sizes[name]["emb_size"]
-            for name in self.cfg.time_varying_cat_decoder
+            for name in self.cfg.dynamic_cat_decoder
         }
-        for name in self.cfg.time_varying_cont_decoder:
+        for name in self.cfg.dynamic_cont_decoder:
             size = self.cfg.hidden_cont_sizes.get(name, self.cfg.hidden_cont_size)
             decoder_input_sizes[name] = size
 
@@ -114,7 +117,7 @@ class TemporalFusionTransformer(nn.Module):
         self.encoder_variable_selection = VariableSelectionNetwork(
             input_sizes=encoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_encoder},
+            input_embedding_flags={name: True for name in self.cfg.dynamic_cat_encoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,
@@ -125,7 +128,7 @@ class TemporalFusionTransformer(nn.Module):
         self.decoder_variable_selection = VariableSelectionNetwork(
             input_sizes=decoder_input_sizes,
             hidden_size=self.cfg.hidden_size,
-            input_embedding_flags={name: True for name in self.cfg.time_varying_cat_decoder},
+            input_embedding_flags={name: True for name in self.cfg.dynamic_cat_decoder},
             dropout=self.cfg.dropout,
             context_size=self.cfg.hidden_size,
             prescalers=self.prescalers,
@@ -133,7 +136,6 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         # Static encoders
-        # for variable selection
         self.static_context_variable_selection = GatedResidualNetwork(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
@@ -141,7 +143,6 @@ class TemporalFusionTransformer(nn.Module):
             dropout=self.cfg.dropout,
         )
 
-        # for hidden state of the lstm
         self.static_context_initial_hidden_lstm = GatedResidualNetwork(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
@@ -149,7 +150,6 @@ class TemporalFusionTransformer(nn.Module):
             dropout=self.cfg.dropout,
         )
 
-        # for cell state of the lstm
         self.static_context_initial_cell_lstm = GatedResidualNetwork(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
@@ -157,7 +157,6 @@ class TemporalFusionTransformer(nn.Module):
             dropout=self.cfg.dropout,
         )
 
-        # for static enrichment
         self.static_context_enrichment = GatedResidualNetwork(
             input_size=self.cfg.hidden_size,
             hidden_size=self.cfg.hidden_size,
@@ -244,35 +243,35 @@ class TemporalFusionTransformer(nn.Module):
         else:
             self.output_layer = nn.Linear(self.cfg.hidden_size, self.cfg.output_size)
 
-    def forward(self, observation: AutoencoderInputBatch) -> TFTOutput:
-        """Observation shape must be (batch_size, time step, covariates)"""
+    def forward(self, obs: AutoencoderInputBatch) -> TFTOutput:
+        """Observation shape i.e., obs must be (batch_size, time step, covariates)"""
         # Sequence length
-        seq_len = observation.encoder_len + observation.decoder_len
+        seq_len = obs.encoder_len + obs.decoder_len
 
         # Transform the categorical to the continuous space
-        hidden_states = self.input_embeddings(observation.cat_var)
+        hidden_states = self.input_embeddings(obs.cat_var)
 
         # Add continous data to hidden states
         hidden_states.update(
             {
-                name: observation.cont_var[..., [i]]
+                name: obs.cont_var[..., [i]]
                 for name, i in self.cfg.cont_var_ordering.items()
                 if name in self.cfg.cont_var
             }
         )
 
-        # We assume that static embedding valuea are constant across time step
+        # We assume that static embedding values are constant across time step
         if len(self.cfg.static_vars) > 0:
             static_emb_input = {name: hidden_states[name][:, 0] for name in self.cfg.static_vars}
             static_emb, static_var_weight = self.static_variable_selection(static_emb_input)
         else:
             static_emb = torch.zeros(
-                (observation.cont_var.size(0), self.cfg.hidden_size),
+                (obs.cont_var.size(0), self.cfg.hidden_size),
                 dtype=self.dtype,
                 device=self.device,
             )
             static_var_weight = torch.zeros(
-                (observation.cont_var.size(0), 0), dtype=self.dtype, device=self.device
+                (obs.cont_var.size(0), 0), dtype=self.dtype, device=self.device
             )
 
         # Copy context values for each time step. TODO Could we have context calculated for each step?
@@ -281,27 +280,21 @@ class TemporalFusionTransformer(nn.Module):
         static_context = static_context[:, None].expand(-1, seq_len, -1)
 
         # Variable selection for Autoencoder
-        time_varying_encoder_input = {
-            name: hidden_states[name][:, : observation.encoder_len]
-            for name in self.cfg.time_varying_encoder_vars
+        dynamic_encoder_input = {
+            name: hidden_states[name][:, : obs.encoder_len]
+            for name in self.cfg.dynamic_encoder_vars
         }
-        time_varying_decoder_input = {
-            name: hidden_states[name][:, observation.encoder_len :]
-            for name in self.cfg.time_varying_decoder_vars
+        dynamic_decoder_input = {
+            name: hidden_states[name][:, obs.encoder_len :]
+            for name in self.cfg.dynamic_decoder_vars
         }
 
-        (
-            emb_varying_encoder,
-            encoder_var_selection_weight,
-        ) = self.encoder_variable_selection(
-            time_varying_encoder_input, static_context[:, : observation.encoder_len]
+        emb_varying_encoder, encoder_var_weight = self.encoder_variable_selection(
+            dynamic_encoder_input, static_context[:, : obs.encoder_len]
         )
 
-        (
-            emb_varying_decoder,
-            decoder_var_selection_weight,
-        ) = self.decoder_variable_selection(
-            time_varying_decoder_input, static_context[:, observation.encoder_len :]
+        emb_varying_decoder, decoder_var_weight = self.decoder_variable_selection(
+            dynamic_decoder_input, static_context[:, obs.encoder_len :]
         )
 
         # Autoencoder network
@@ -334,22 +327,18 @@ class TemporalFusionTransformer(nn.Module):
         attn_input = self.static_enrichment(ae_output, static_context_enrichment_output)
 
         # Attention
-        mask = self.get_attention_mask(
-            decoder_len=observation.decoder_len, encoder_len=observation.encoder_len
-        )
+        mask = self.get_attention_mask(decoder_len=obs.decoder_len, encoder_len=obs.encoder_len)
         attn_output, attn_weights = self.multihead_attn(
-            x_query=attn_input[:, observation.encoder_len :],
+            x_query=attn_input[:, obs.encoder_len :],
             x_key=attn_input,
             x_value=attn_input,
             mask=mask,
         )
-        attn_output = self.post_attn_gate_norm(
-            attn_output, attn_input[:, observation.encoder_len :]
-        )
+        attn_output = self.post_attn_gate_norm(attn_output, attn_input[:, obs.encoder_len :])
         output = self.pos_wise_ff(attn_output)
 
         # Prediction
-        output = self.pre_output_gate_norm(output, ae_output[:, observation.encoder_len :])
+        output = self.pre_output_gate_norm(output, ae_output[:, obs.encoder_len :])
         if self.cfg.num_targets > 1:  # Multi-target architecture
             output = [output_layer(output) for output_layer in self.output_layer]
         else:
@@ -357,11 +346,11 @@ class TemporalFusionTransformer(nn.Module):
 
         return TFTOutput(
             prediction=output,
-            encoder_attn_weight=attn_weights[..., : observation.encoder_len],
-            decoder_attn_weight=attn_weights[..., observation.encoder_len :],
+            encoder_attn_weight=attn_weights[..., : obs.encoder_len],
+            decoder_attn_weight=attn_weights[..., obs.encoder_len :],
             static_var_weight=static_var_weight,
-            encoder_var_selection_weight=encoder_var_selection_weight,
-            decoder_var_selection_weight=decoder_var_selection_weight,
+            encoder_var_weight=encoder_var_weight,
+            decoder_var_weight=decoder_var_weight,
         )
 
     def get_attention_mask(self, encoder_len: int, decoder_len: int) -> torch.Tensor:
