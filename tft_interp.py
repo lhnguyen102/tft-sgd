@@ -70,7 +70,7 @@ class Visualizer:
         self,
         figsize: tuple = (12, 6),
         lw: float = 2,
-        fontsize: float = 12,
+        fontsize: float = 16,
         ndiv_x: int = 5,
         ndiv_y: int = 4,
     ) -> None:
@@ -280,7 +280,9 @@ class Visualizer:
         )
 
         # Show the plot
-        plt.title(f"Prediction with Attention Scores - horizon {horizon_idx}")
+        plt.title(
+            f"Prediction with Attention Scores - horizon {horizon_idx}", fontsize=self.fontsize
+        )
         fig.tight_layout()
 
         # Save figure
@@ -313,7 +315,8 @@ class Visualizer:
         axe = plt.axes()
         axe.barh(sorted_names, sorted_scores, color="tab:blue")
         axe.set_xlabel("Feature Importance Score", fontsize=self.fontsize)
-        plt.title(f"Feature Importance for {var_type}")
+        axe.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
+        plt.title(f"Feature Importance for {var_type}", fontsize=self.fontsize)
         plt.gca().invert_yaxis()  # To display the feature with the highest score at the top
         plt.tight_layout()
 
