@@ -35,12 +35,17 @@ python runner.py
 <p align="center">
   <div>
     <img src="./figure/prediction.png" width="340px" style="display: inline-block; margin-right: 70px;">
-    <img src="./figure/encoder_var_score.png" width="350px" style="display: inline-block;">
+    <img src="./figure/encoder_var_score.png" width="340px" style="display: inline-block;">
+  </div>
+  <div style="margin-top: 20px;">
+    <img src="./figure/decoder_var_score.png" width="340px" style="display: inline-block; margin-right: 70px;">
+    <img src="./figure/static_var_score.png" width="340px" style="display: inline-block;">
   </div>
   <div style="margin-top: 20px;">
     <img src="./figure/heat_map_attention_score.png" width="340px" style="display: inline-block; margin-right: 70px;">
-    <img src="./figure/attention_score.png" width="350px" style="display: inline-block;">
+    <img src="./figure/attention_score.png" width="340px" style="display: inline-block;">
   </div>
+  
 </p>
 
 

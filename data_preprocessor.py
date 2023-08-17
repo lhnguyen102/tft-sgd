@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, List, Tuple, Union
+from typing import Dict, List, Tuple
 
 import numpy as np
 import pandas as pd
@@ -53,6 +53,21 @@ def custom_collate_fn(batch: List[Tuple[AutoencoderInputBatch, TFTTargetBatch]])
     return input_batch, output_batch, index_batch
 
 
+def send_data_to_device(
+    input_batch: AutoencoderInputBatch, output_batch: TFTTargetBatch, device: torch.device
+) -> Tuple[AutoencoderInputBatch, TFTTargetBatch]:
+    """Send data to device"""
+    intput_batch_device = AutoencoderInputBatch(
+        cont_var=input_batch.cont_var.to(device),
+        cat_var=input_batch.cat_var.to(device),
+        encoder_len=input_batch.encoder_len,
+        decoder_len=input_batch.decoder_len,
+    )
+    output_batch_device = TFTTargetBatch(target=output_batch.target.to(device))
+
+    return intput_batch_device, output_batch_device
+
+
 class TFTDataset(Dataset):
     """Custom dataset for time series"""
 
@@ -73,15 +88,6 @@ class TFTDataset(Dataset):
         self.target_tensor = torch.tensor(
             data[self.cfg.target_var].to_numpy(dtype=np.float32)
         ).float()
-
-        if self.cfg.device == "cuda" and torch.cuda.is_available():
-            self.device = torch.device("cuda")
-            self.cont_tensor = self.cont_tensor.to(self.device)
-            self.target_tensor = self.target_tensor.to(self.device)
-            if self.has_cat_var:
-                self.cat_tensor = self.cat_tensor.to(self.device)
-        else:
-            self.device = torch.device("cpu")
 
         # Store start and end sequence indices from the DataFrame
         self.start_seq_indices = data["start_seq_idx"].tolist()

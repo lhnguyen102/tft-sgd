@@ -9,6 +9,95 @@ from config import TFTConfig
 from tft import TFTOutput
 
 
+def interpret_prediction(
+    pred: TFTOutput, cfg: TFTConfig, target: torch.Tensor, obs: Union[torch.Tensor, None] = None
+) -> None:
+    """Intepret the predictions"""
+    # Interpretation
+    interpreter = TFTInterpreter(cfg)
+    viz = Visualizer()
+
+    interp_results = interpreter.analyze_tft_output(pred)
+    pred_mean = interpreter.quantile_to_prediciton(pred.prediction)
+    lower_bound, upper_bound = interpreter.get_uncertainty_bounds(pred.prediction, pos=1)
+
+    # Indices
+    plot_idx = 0  # First obs in the batch
+    horizon_idx = 0  # First prediction
+    time_idx = np.arange(cfg.decoder_len)  # Prediction time index
+    attn_time_idx = np.concatenate([np.arange(-cfg.encoder_len, 0), np.arange(cfg.decoder_len)])
+
+    # Prediction and actual values
+    pred_val = pred_mean[plot_idx, :]
+    pred_val[np.isnan(pred_val)] = 0.0
+    if obs is None:
+        actual_val = target[plot_idx, :].detach().cpu().numpy().flatten()
+        actual_time_idx = time_idx
+    else:
+        actual_val = obs[plot_idx, :].detach().cpu().numpy().flatten()
+        actual_time_idx = np.concatenate(
+            [np.arange(-cfg.encoder_len, 0), np.arange(cfg.decoder_len)]
+        )
+
+    # Attention score
+    attn_score = interp_results["attn_score"][plot_idx, horizon_idx]
+    attn_score = attn_score.sum(axis=0) / attn_score.shape[0]
+    attn_score[np.isnan(attn_score)] = 0.0
+    hm_attn_score = interp_results["attn_score"][plot_idx, :]
+    hm_attn_score = hm_attn_score.sum(axis=1) / hm_attn_score.shape[1]
+    hm_attn_score[np.isnan(hm_attn_score)] = 0.0
+
+    # Selection variable score
+    encoder_var_score = interp_results["encoder_var_score"][plot_idx]
+    decoder_var_score = interp_results["decoder_var_score"][plot_idx]
+    static_var_score = interp_results["static_var_score"][plot_idx]
+
+    # Visualize the prediction with the actual values
+    viz.plot_prediction(
+        x_pred=time_idx,
+        pred_val=pred_val,
+        pred_low=lower_bound[plot_idx, :],
+        pred_high=upper_bound[plot_idx, :],
+        x_actual=actual_time_idx,
+        actual_val=actual_val,
+    )
+
+    # Overlap the attention score with prediction and actual values
+    viz.plot_prediction_with_attention_score(
+        x_pred=time_idx,
+        pred_val=pred_val,
+        x_attn=attn_time_idx,
+        attn_score=attn_score,
+        x_actual=actual_time_idx,
+        actual_val=actual_val,
+        horizon_idx=horizon_idx,
+    )
+
+    # Visualize the important feature fore the encoder. Note that we can do the same for decoder
+    # and static variable
+    viz.plot_importance_features(
+        var_names=cfg.dynamic_encoder_vars,
+        score=encoder_var_score,
+        filename="encoder_var_score",
+        var_type="Encoder Variables",
+    )
+    viz.plot_importance_features(
+        var_names=cfg.dynamic_decoder_vars,
+        score=decoder_var_score,
+        filename="decoder_var_score",
+        var_type="Decoder Variables",
+    )
+    viz.plot_importance_features(
+        var_names=cfg.static_vars,
+        score=static_var_score,
+        filename="static_var_score",
+        var_type="Static Variables",
+    )
+
+    # Heatmap
+    viz.plot_attn_score_heat_map(x_heat=attn_time_idx, attn_score=hm_attn_score)
+
+
 class TFTInterpreter:
     """Analysis of TFT results"""
 
@@ -70,7 +159,7 @@ class Visualizer:
         self,
         figsize: tuple = (12, 6),
         lw: float = 2,
-        fontsize: float = 16,
+        fontsize: float = 22,
         ndiv_x: int = 5,
         ndiv_y: int = 4,
     ) -> None:
@@ -91,22 +180,28 @@ class Visualizer:
 
         fig = plt.figure(figsize=self.figsize)
         ax = plt.axes()
-        cax = ax.imshow(attn_score, cmap="plasma", aspect="auto")
-        fig.colorbar(cax, ax=ax)
+        cax = ax.imshow(attn_score, cmap="YlGnBu", aspect="auto")
+        cbar = fig.colorbar(cax, ax=ax)
+        cbar.ax.tick_params(labelsize=self.fontsize)
 
         # x axis
         x_tick_labels = np.linspace(x_heat.min(), x_heat.max(), num=self.ndiv_x, endpoint=True)
         x_positions = np.linspace(0, attn_score.shape[1], self.ndiv_x, endpoint=True)
         ax.set_xticks(x_positions)
         ax.set_xticklabels(x_tick_labels.astype(int))
+        ax.set_xlabel("Time Index", fontsize=self.fontsize)
 
         # y axis
         y_positions = np.linspace(1, attn_score.shape[0] + 1, self.ndiv_y, endpoint=True)
         ax.set_yticks(y_positions)
         ax.set_yticklabels(y_positions.astype(int))
+        ax.set_ylabel("Horizon", fontsize=self.fontsize)
+
         ax.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
 
-        ax.set_title("Heat Map Attention Score")
+        ax.set_title("Attention Score Heat Map", fontsize=self.fontsize, fontweight="semibold")
+        fig.tight_layout()
+
         # Save figure
         if saved_dir is not None:
             os.makedirs(saved_dir, exist_ok=True)
@@ -130,7 +225,8 @@ class Visualizer:
     ) -> (plt.Figure, plt.Axes):
         """Plot prediction versus actual"""
 
-        fig, ax = plt.subplots(figsize=self.figsize)
+        fig = plt.figure(figsize=self.figsize)
+        ax = plt.axes()
 
         # Plot prediction
         ax.plot(x_pred, pred_val, lw=self.lw, color="tab:blue", label="Prediction")
@@ -177,7 +273,8 @@ class Visualizer:
         ax.legend(
             loc="best", edgecolor="black", fontsize=0.9 * self.fontsize, ncol=2, framealpha=0.3
         )
-        ax.set_title("Prediction vs Actual")
+        ax.set_title("Prediction vs Actual", fontsize=self.fontsize, fontweight="semibold")
+        fig.tight_layout()
 
         # Save figure
         if saved_dir is not None:
@@ -211,10 +308,9 @@ class Visualizer:
         ax1 = plt.axes()
 
         # Plot predicted values on main y-axis
-        ax1.set_xlabel("Index", fontsize=self.fontsize)
-        ax1.set_ylabel("Predicted Value", color="tab:blue", fontsize=self.fontsize)
+        ax1.set_xlabel("Time Index", fontsize=self.fontsize)
+        ax1.set_ylabel("Predicted Value", fontsize=self.fontsize)
         ax1.plot(x_pred, pred_val, lw=self.lw, color="tab:blue", label="Prediction")
-        ax1.tick_params(axis="y", labelcolor="tab:blue")
 
         # If actual values are provided, plot them on the same axis
         if x_actual is not None and actual_val is not None:
@@ -281,7 +377,9 @@ class Visualizer:
 
         # Show the plot
         plt.title(
-            f"Prediction with Attention Scores - horizon {horizon_idx}", fontsize=self.fontsize
+            f"Prediction with Attention Scores - Horizon {horizon_idx}",
+            fontsize=self.fontsize,
+            fontweight="semibold",
         )
         fig.tight_layout()
 
@@ -314,9 +412,11 @@ class Visualizer:
         plt.figure(figsize=self.figsize)
         axe = plt.axes()
         axe.barh(sorted_names, sorted_scores, color="tab:blue")
-        axe.set_xlabel("Feature Importance Score", fontsize=self.fontsize)
+        axe.set_xlabel("Score", fontsize=self.fontsize)
         axe.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
-        plt.title(f"Feature Importance for {var_type}", fontsize=self.fontsize)
+        plt.title(
+            f"Feature Importance for {var_type}", fontsize=self.fontsize, fontweight="semibold"
+        )
         plt.gca().invert_yaxis()  # To display the feature with the highest score at the top
         plt.tight_layout()
 

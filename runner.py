@@ -1,5 +1,3 @@
-from typing import List, Union
-
 import numpy as np
 import pandas as pd
 import torch
@@ -8,15 +6,11 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from config import TFTConfig
-from data_preprocessor import (
-    Preprocessor,
-    TFTDataset,
-    TimeseriesEncoderNormalizer,
-    custom_collate_fn,
-)
+from data_preprocessor import Preprocessor, TFTDataset, custom_collate_fn, send_data_to_device
 from metric import QuantileLoss
-from tft import TemporalFusionTransformer, TFTModel, TFTOutput
-from tft_interp import TFTInterpreter, Visualizer
+from tft import TemporalFusionTransformer, TFTModel
+from tft_interp import interpret_prediction
+from utils import denormalize_target
 
 
 def load_data_from_txt() -> pd.DataFrame:
@@ -29,7 +23,6 @@ def load_data_from_txt() -> pd.DataFrame:
 
     # Resample the data
     data = data.resample("1h").mean().replace(0.0, np.nan)
-    earliest_time = data.index.min()
     data_frame = data[["MT_002", "MT_004", "MT_005", "MT_006", "MT_008"]]
 
     df_list = []
@@ -57,87 +50,20 @@ def load_data_from_txt() -> pd.DataFrame:
     return time_df
 
 
-def interpret_prediction(
-    pred: TFTOutput, cfg: TFTConfig, target: torch.Tensor, obs: Union[torch.Tensor, None] = None
-) -> None:
-    """Intepret the predictions"""
-    # Interpretation
-    interpreter = TFTInterpreter(cfg)
-    viz = Visualizer()
-
-    interp_results = interpreter.analyze_tft_output(pred)
-    pred_mean = interpreter.quantile_to_prediciton(pred.prediction)
-    lower_bound, upper_bound = interpreter.get_uncertainty_bounds(pred.prediction, pos=1)
-
-    # Indices
-    plot_idx = 0  # First obs in the batch
-    horizon_idx = 0  # First prediction
-    time_idx = np.arange(cfg.decoder_len)  # Prediction time index
-    attn_time_idx = np.concatenate([np.arange(-cfg.encoder_len, 0), np.arange(cfg.decoder_len)])
-
-    # Prediction and actual values
-    pred_val = pred_mean[plot_idx, :]
-    pred_val[np.isnan(pred_val)] = 0.0
-    if obs is None:
-        actual_val = target[plot_idx, :].detach().cpu().numpy().flatten()
-        actual_time_idx = time_idx
-    else:
-        actual_val = obs[plot_idx, :].detach().cpu().numpy().flatten()
-        actual_time_idx = np.concatenate(
-            [np.arange(-cfg.encoder_len, 0), np.arange(cfg.decoder_len)]
-        )
-
-    # Attention score
-    attn_score = interp_results["attn_score"][plot_idx, horizon_idx]
-    attn_score = attn_score.sum(axis=0) / attn_score.shape[0]
-    attn_score[np.isnan(attn_score)] = 0.0
-    encoder_var_score = interp_results["encoder_var_score"][plot_idx]
-    hm_attn_score = interp_results["attn_score"][plot_idx, :]
-    hm_attn_score = hm_attn_score.sum(axis=1) / hm_attn_score.shape[1]
-    hm_attn_score[np.isnan(hm_attn_score)] = 0.0
-
-    # Visualize the prediction with the actual values
-    viz.plot_prediction(
-        x_pred=time_idx,
-        pred_val=pred_val,
-        pred_low=lower_bound[plot_idx, :],
-        pred_high=upper_bound[plot_idx, :],
-        x_actual=actual_time_idx,
-        actual_val=actual_val,
-    )
-
-    # Overlap the attention score with prediction and actual values
-    viz.plot_prediction_with_attention_score(
-        x_pred=time_idx,
-        pred_val=pred_val,
-        x_attn=attn_time_idx,
-        attn_score=attn_score,
-        x_actual=actual_time_idx,
-        actual_val=actual_val,
-        horizon_idx=horizon_idx,
-    )
-
-    # Visualize the important feature fore the encoder. Note that we can do the same for decoder
-    # and static variable
-    viz.plot_importance_features(
-        var_names=cfg.dynamic_encoder_vars,
-        score=encoder_var_score,
-        filename="encoder_var_score",
-        var_type="Encoder Variable Scores",
-    )
-
-    # Heatmap
-    viz.plot_attn_score_heat_map(x_heat=attn_time_idx, attn_score=hm_attn_score)
-
-
 def validate(
-    dataloader: DataLoader, network: TemporalFusionTransformer, loss_fn: QuantileLoss
+    dataloader: DataLoader,
+    network: TemporalFusionTransformer,
+    loss_fn: QuantileLoss,
+    device: torch.device,
 ) -> float:
     """Validation step during the training"""
 
     val_losses = []
     network.eval()
     for x_batch, y_batch, _ in dataloader:
+        x_batch, y_batch = send_data_to_device(
+            input_batch=x_batch, output_batch=y_batch, device=device
+        )
         with torch.no_grad():
             pred = network(x_batch)
             loss = loss_fn(pred.prediction, y_batch.target)
@@ -149,35 +75,6 @@ def validate(
     return avg_val_loss
 
 
-def denormalize_target(
-    target: torch.Tensor, target_var: List[str], normalizer: TimeseriesEncoderNormalizer
-) -> torch.Tensor:
-    """Denormalize the target data"""
-    target_numpy = target.detach().cpu().numpy()
-    data_frame = pd.DataFrame(
-        {name: target_numpy[..., i].flatten() for i, name in enumerate(target_var)}
-    )
-    batch_size, seq_len, _ = target.shape
-
-    denorm_df = normalizer.denormalize(data_frame)
-    denorm_targets = [
-        torch.tensor(denorm_df[name].to_numpy(np.float32), dtype=torch.float32).reshape(
-            batch_size, seq_len, 1
-        )
-        for name in target_var
-    ]
-
-    denorm_targets = []
-    for target_name in target_var:
-        tmp = torch.tensor(
-            denorm_df[target_name].to_numpy(np.float32), dtype=torch.float32
-        ).reshape(batch_size, seq_len, 1)
-
-        denorm_targets.append(tmp)
-
-    return torch.cat(denorm_targets, dim=2)
-
-
 def main():
     """Test data preprocessor"""
     # Load raw data
@@ -185,13 +82,19 @@ def main():
 
     # Config
     cfg = TFTConfig(
-        dynamic_cat_encoder=["hour", "day", "day_of_week", "month"],
-        dynamic_cat_decoder=["hour", "day", "day_of_week", "month"],
+        dynamic_cat_encoder=["hour", "day_of_week", "month", "day_of_year"],
+        dynamic_cat_decoder=["hour", "day_of_week", "month", "day_of_year", "time_idx"],
         dynamic_cont_encoder=["power_usage"],
         static_cats=["data_id"],
         cont_transform_method={"power_usage": "softplus"},
         target_var=["power_usage"],
     )
+
+    # Device
+    if cfg.device == "cuda" and torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
 
     # Preprocess data
     data_prep = Preprocessor(data=raw_df, cfg=cfg)
@@ -212,10 +115,19 @@ def main():
     val_dataset = TFTDataset(cfg=cfg, data=split_data_frame["val"])
     test_dataset = TFTDataset(cfg=cfg, data=split_data_frame["test"])
     dataloader = DataLoader(
-        train_dataset, batch_size=cfg.batch_size, shuffle=True, collate_fn=custom_collate_fn
+        train_dataset,
+        batch_size=cfg.batch_size,
+        shuffle=True,
+        collate_fn=custom_collate_fn,
+        pin_memory=True,
+        num_workers=2,
     )
     val_dataloader = DataLoader(
-        val_dataset, batch_size=cfg.batch_size, collate_fn=custom_collate_fn
+        val_dataset,
+        batch_size=cfg.batch_size,
+        collate_fn=custom_collate_fn,
+        pin_memory=True,
+        num_workers=2,
     )
     test_dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=custom_collate_fn)
 
@@ -227,6 +139,9 @@ def main():
         for i, (x_batch, y_batch, _) in tqdm(
             enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
         ):
+            x_batch, y_batch = send_data_to_device(
+                input_batch=x_batch, output_batch=y_batch, device=device
+            )
             pred = tft_model.network(x_batch)
             loss = loss_fn(pred.prediction, y_batch.target)
 
@@ -241,7 +156,7 @@ def main():
 
         # Validate
         avg_val_loss = validate(
-            dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn
+            dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn, device=device
         )
         print(
             f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
@@ -255,6 +170,9 @@ def main():
     tft_model.load()
     test_df = split_data_frame["test"]
     for i, (x_batch, y_batch, index_batch) in enumerate(test_dataloader):
+        x_batch, y_batch = send_data_to_device(
+            input_batch=x_batch, output_batch=y_batch, device=device
+        )
         with torch.no_grad():
             pred = tft_model.network(x_batch)
 

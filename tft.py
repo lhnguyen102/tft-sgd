@@ -306,7 +306,7 @@ class TemporalFusionTransformer(nn.Module):
         )
 
         encoder_output, (encoder_hidden, encoder_cell) = self.lstm_encoder(
-            emb_varying_encoder, (init_lstm_hidden, init_lstm_cell)
+            emb_varying_encoder, (init_lstm_hidden.contiguous(), init_lstm_cell.contiguous())
         )
 
         decoder_output, _ = self.lstm_decoder(emb_varying_decoder, (encoder_hidden, encoder_cell))
