@@ -81,9 +81,13 @@ def main():
     raw_df = load_data_from_txt()
 
     # Config
+    quantile = [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95]
     cfg = TFTConfig(
-        dynamic_cat_encoder=["hour", "day_of_week", "month", "day_of_year"],
-        dynamic_cat_decoder=["hour", "day_of_week", "month", "day_of_year", "time_idx"],
+        quantiles=quantile,
+        output_size=len(quantile),
+        time_cat_features=["hour", "day_of_week", "day", "month"],
+        dynamic_cat_encoder=["hour", "day_of_week", "day", "month"],
+        dynamic_cat_decoder=["hour", "day_of_week", "day"],
         dynamic_cont_encoder=["power_usage"],
         static_cats=["data_id"],
         cont_transform_method={"power_usage": "softplus"},
@@ -119,15 +123,10 @@ def main():
         batch_size=cfg.batch_size,
         shuffle=True,
         collate_fn=custom_collate_fn,
-        pin_memory=True,
         num_workers=2,
     )
     val_dataloader = DataLoader(
-        val_dataset,
-        batch_size=cfg.batch_size,
-        collate_fn=custom_collate_fn,
-        pin_memory=True,
-        num_workers=2,
+        val_dataset, batch_size=cfg.batch_size, collate_fn=custom_collate_fn, num_workers=2
     )
     test_dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=custom_collate_fn)
 

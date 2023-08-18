@@ -763,8 +763,8 @@ class Preprocessor:
     def split_data(
         data_frame: pd.DataFrame,
         total_seq_len: int,
-        train_ratio: float = 0.8,
-        val_ratio: float = 0.1,
+        train_ratio: float = 0.7,
+        val_ratio: float = 0.15,
     ) -> dict:
         """Split data frame into train, validation, and test sets"""
 

@@ -52,11 +52,11 @@ class TFTConfig:
     num_epochs: int = 10
     batch_size: int = 128
     output_size: Union[List[int], int] = 7
-    hidden_size: int = 64
+    hidden_size: int = 150
     num_lstm_layers: int = 1
     num_attn_head_size: int = 4
     dropout: float = 0.1
-    hidden_cont_size: int = 64
+    hidden_cont_size: int = 150
     decoder_len: int = 48
     encoder_len: int = 168
     lr: float = 3.5e-4
@@ -72,7 +72,9 @@ class TFTConfig:
 
     # User-specidied data variables
     target_var: List[str] = field(default_factory=list)
-    time_cat_features = ["hour", "day_of_week", "day_of_year", "month"]
+    time_cat_features: List[str] = field(
+        default_factory=lambda: ["hour", "day_of_week", "day_of_year", "month"]
+    )
     dynamic_cat_encoder: List[str] = field(default_factory=list)
     dynamic_cat_decoder: List[str] = field(default_factory=list)
     dynamic_cont_encoder: List[str] = field(default_factory=list)
