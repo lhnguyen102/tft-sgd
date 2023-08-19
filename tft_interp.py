@@ -312,7 +312,7 @@ class Visualizer:
         fig = plt.figure(figsize=self.figsize)
         if ax is None:
             ax = plt.axes()
-        cax = ax.imshow(attn_score, cmap="YlGnBu", aspect="auto")
+        cax = ax.imshow(attn_score, cmap="OrRd", aspect="auto", vmin=0, vmax=1)
         cbar = fig.colorbar(cax, ax=ax, orientation="horizontal")
         cbar.ax.tick_params(labelsize=self.fontsize)
 

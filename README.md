@@ -1,7 +1,6 @@
 # Transformer Temporal Fusion
 Pytorch implementation of [Transformer Temporal Fusion](https://ai.googleblog.com/2021/12/interpretable-deep-learning-for-time.html) (TFT) for time series forecast. 
-This implementation, adapted from the referenced repository [pytorch-forecasting](https://pytorch-forecasting.readthedocs.io/en/stable/index.html)
-, simplified for developers outside the computer science field.
+This implementation, adapted from the referenced repository [pytorch-forecasting](https://pytorch-forecasting.readthedocs.io/en/stable/index.html), simplified for developers outside the computer science field.
 
 <p align="center">
   <img src="./figure/forecast.gif" width="700px" height="500px" >
