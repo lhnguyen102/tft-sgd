@@ -1,13 +1,24 @@
 import os
 from typing import List, Tuple, Union
 
+import imageio
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import imageio
+from PIL import Image
 
 from config import TFTConfig
 from tft import TFTOutput
+
+
+def add_white_background(image):
+    # Create a white background image
+    white_background = Image.new("RGB", image.size, "white")
+
+    # Paste the original image onto the white background
+    # Using the image itself as the mask ensures that any transparency is respected
+    white_background.paste(image, (0, 0), mask=image)
+    return white_background
 
 
 def create_gif(
@@ -275,7 +286,7 @@ class Visualizer:
             )
             fig.tight_layout()
             fig.subplots_adjust(hspace=0.2)
-            fig.savefig(os.path.join(save_dir, filename))
+            plt.savefig(os.path.join(save_dir, filename))
             plt.close(fig)
 
             count += 1
@@ -283,7 +294,7 @@ class Visualizer:
 
         # Create GIF
         loaded_images = [imageio.imread(image) for image in images]
-        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=15, loop=0)
+        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=2, loop=0)
 
         # Delete saved images
         for filepath in images:
