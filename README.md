@@ -24,6 +24,7 @@ We recommend installing miniconda for managing Python environment, yet this repo
 pip install -r requirements.txt
 ```
 
+## Example of Power Usage Prediction
 ### Download Example Data
 Either run the following command to download the data or directly visit the provided URL
 
