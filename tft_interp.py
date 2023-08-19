@@ -283,7 +283,7 @@ class Visualizer:
 
         # Create GIF
         loaded_images = [imageio.imread(image) for image in images]
-        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=5, loop=0)
+        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=15, loop=0)
 
         # Delete saved images
         for filepath in images:
