@@ -9,7 +9,7 @@ from config import TFTConfig
 from data_preprocessor import Preprocessor, TFTDataset, custom_collate_fn, send_data_to_device
 from metric import QuantileLoss
 from tft import TemporalFusionTransformer, TFTModel
-from tft_interp import interpret_prediction
+from tft_interp import interpret_prediction, create_gif
 from utils import denormalize_target
 
 
@@ -130,44 +130,47 @@ def main():
     )
     test_dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=custom_collate_fn)
 
-    # Train
-    best_val_loss = np.inf
-    print("Training...")
-    for e in range(cfg.num_epochs):
-        losses = []
-        for i, (x_batch, y_batch, _) in tqdm(
-            enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
-        ):
-            x_batch, y_batch = send_data_to_device(
-                input_batch=x_batch, output_batch=y_batch, device=device
-            )
-            pred = tft_model.network(x_batch)
-            loss = loss_fn(pred.prediction, y_batch.target)
+    # # Train
+    # best_val_loss = np.inf
+    # print("Training...")
+    # for e in range(cfg.num_epochs):
+    #     losses = []
+    #     for i, (x_batch, y_batch, _) in tqdm(
+    #         enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
+    #     ):
+    #         x_batch, y_batch = send_data_to_device(
+    #             input_batch=x_batch, output_batch=y_batch, device=device
+    #         )
+    #         pred = tft_model.network(x_batch)
+    #         loss = loss_fn(pred.prediction, y_batch.target)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
 
-            losses.append(loss.item())
-            if np.isnan(loss.item()):
-                raise ValueError("Loss is NAN")
-        avg_train_loss = sum(losses) / len(losses)
+    #         losses.append(loss.item())
+    #         if np.isnan(loss.item()):
+    #             raise ValueError("Loss is NAN")
+    #     avg_train_loss = sum(losses) / len(losses)
 
-        # Validate
-        avg_val_loss = validate(
-            dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn, device=device
-        )
-        print(
-            f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
-        )
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-        tft_model.save()
+    #     # Validate
+    #     avg_val_loss = validate(
+    #         dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn, device=device
+    #     )
+    #     print(
+    #         f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
+    #     )
+    #     if avg_val_loss < best_val_loss:
+    #         best_val_loss = avg_val_loss
+    #     tft_model.save()
 
     # Test
     print("Testing...")
     tft_model.load()
     test_df = split_data_frame["test"]
+    preds = []
+    obs = []
+    obs_dts = []
     for i, (x_batch, y_batch, index_batch) in enumerate(test_dataloader):
         x_batch, y_batch = send_data_to_device(
             input_batch=x_batch, output_batch=y_batch, device=device
@@ -176,9 +179,9 @@ def main():
             pred = tft_model.network(x_batch)
 
             denorm_preds = []
-            for i in range(pred.prediction.shape[2]):
+            for j in range(pred.prediction.shape[2]):
                 denorm_pred = denormalize_target(
-                    target=pred.prediction[..., [i]],
+                    target=pred.prediction[..., [j]],
                     target_var=cfg.target_var,
                     normalizer=data_prep.normalizer_encoder,
                 )
@@ -187,15 +190,20 @@ def main():
 
             # Get the full sequence of observation
             batch_seq_obs = []
+            batch_seq_dt = []
             for idx in index_batch:
                 start_seq_idx = test_df.loc[idx, "start_seq_idx"]
                 end_seq_idx = test_df.loc[idx, "end_seq_idx"] - 1
                 seq_obs = test_df.loc[start_seq_idx:end_seq_idx, cfg.target_var].to_numpy(
                     np.float32
                 )
+                seq_dt = test_df.loc[start_seq_idx:end_seq_idx, "date"].values
+
                 batch_seq_obs.append(torch.tensor(seq_obs, dtype=torch.float32))
+                batch_seq_dt.append(seq_dt)
 
             batch_seq_obs = torch.stack(batch_seq_obs)
+            batch_seq_dt = np.stack(batch_seq_dt)
 
             # Denormalize target & observation
             denorm_target = denormalize_target(
@@ -209,8 +217,18 @@ def main():
                 normalizer=data_prep.normalizer_encoder,
             )
             pred.prediction = denorm_preds
-            interpret_prediction(pred=pred, cfg=cfg, target=denorm_target, obs=denorm_obs)
-            break
+            if i == 0:
+                interpret_prediction(pred=pred, cfg=cfg, target=denorm_target, obs=denorm_obs)
+
+            if i == 50:
+                break
+
+            preds.append(pred)
+            obs.append(denorm_obs)
+            obs_dts.append(batch_seq_dt)
+
+    # Create gif
+    create_gif(cfg=cfg, preds=preds, observations=obs, obs_dts=obs_dts)
 
 
 if __name__ == "__main__":

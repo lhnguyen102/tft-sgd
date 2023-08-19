@@ -4,9 +4,71 @@ from typing import List, Tuple, Union
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import imageio
 
 from config import TFTConfig
 from tft import TFTOutput
+
+
+def create_gif(
+    cfg: TFTConfig,
+    preds: List[TFTOutput],
+    observations: List[torch.Tensor],
+    obs_dts: List[np.ndarray],
+) -> None:
+    """Create GIF"""
+    # Interpretation
+    interpreter = TFTInterpreter(cfg)
+    viz = Visualizer()
+
+    pred_plots = []
+    actual_plots = []
+    x_pred_plots = []
+    x_actual_plots = []
+    low_plots = []
+    hight_plots = []
+    hm_attn_scores = []
+    for pred, obs in zip(preds, observations):
+        # Prediction results
+        interp_results = interpreter.analyze_tft_output(pred)
+        pred_mean = interpreter.quantile_to_prediciton(pred.prediction)
+        lower_bound, upper_bound = interpreter.get_uncertainty_bounds(pred.prediction, pos=1)
+
+        # Indices
+        plot_idx = 0  # First obs in the batch
+        time_idx = np.arange(cfg.decoder_len)  # Prediction time index
+
+        # Prediction and actual values
+        pred_val = pred_mean[plot_idx, :]
+        pred_val[np.isnan(pred_val)] = 0.0
+
+        actual_val = obs[plot_idx, :].detach().cpu().numpy().flatten()
+        actual_time_idx = np.concatenate(
+            [np.arange(-cfg.encoder_len, 0), np.arange(cfg.decoder_len)]
+        )
+
+        # Attention score
+        hm_attn_score = interp_results["attn_score"][plot_idx, :]
+        hm_attn_score = hm_attn_score.sum(axis=1) / hm_attn_score.shape[1]
+        hm_attn_score[np.isnan(hm_attn_score)] = 0.0
+
+        pred_plots.append(pred_mean.flatten())
+        actual_plots.append(actual_val)
+        x_pred_plots.append(time_idx)
+        x_actual_plots.append(actual_time_idx)
+        low_plots.append(lower_bound.flatten())
+        hight_plots.append(upper_bound.flatten())
+        hm_attn_scores.append(hm_attn_score)
+
+    viz.create_gif(
+        x_pred=x_pred_plots,
+        y_pred=pred_plots,
+        x_true=x_actual_plots,
+        y_true=actual_plots,
+        pred_low=low_plots,
+        pred_high=hight_plots,
+        hm_attn_scores=hm_attn_scores,
+    )
 
 
 def interpret_prediction(
@@ -71,6 +133,8 @@ def interpret_prediction(
         x_actual=actual_time_idx,
         actual_val=actual_val,
         horizon_idx=horizon_idx,
+        pred_low=lower_bound[plot_idx, :],
+        pred_high=upper_bound[plot_idx, :],
     )
 
     # Visualize the important feature fore the encoder. Note that we can do the same for decoder
@@ -157,7 +221,7 @@ class Visualizer:
 
     def __init__(
         self,
-        figsize: tuple = (12, 6),
+        figsize: tuple = (13, 6),
         lw: float = 2,
         fontsize: float = 22,
         ndiv_x: int = 5,
@@ -169,19 +233,76 @@ class Visualizer:
         self.ndiv_x = ndiv_x
         self.ndiv_y = ndiv_y
 
+    def create_gif(
+        self,
+        x_pred: List[np.ndarray],
+        y_pred: List[np.ndarray],
+        x_true: List[np.ndarray],
+        y_true: List[np.ndarray],
+        pred_low: List[np.ndarray],
+        pred_high: List[np.ndarray],
+        hm_attn_scores: List[np.ndarray],
+        save_dir: str = "./figure",
+    ) -> None:
+        """Create gif for forecasting"""
+
+        count = 0
+        images = []
+        for x_p, y_p, x_t, y_t, y_low, y_high, hm_attn_score in zip(
+            x_pred, y_pred, x_true, y_true, pred_low, pred_high, hm_attn_scores
+        ):
+            # Figure setup
+            filename = f"prediction_{count}"
+            fig, axs = plt.subplots(nrows=2, ncols=1, figsize=(22, 16))
+            self.lw = 4
+            self.fontsize = 26
+
+            # Plot
+            self.plot_attn_score_heat_map(
+                x_heat=x_t, attn_score=hm_attn_score, saved_dir=None, ax=axs[1]
+            )
+            self.plot_prediction(
+                x_pred=x_p,
+                pred_val=y_p,
+                x_actual=x_t,
+                actual_val=y_t,
+                pred_low=y_low,
+                pred_high=y_high,
+                filename=filename,
+                ax=axs[0],
+                saved_dir=None,
+                is_subplot=True,
+            )
+            fig.tight_layout()
+            fig.subplots_adjust(hspace=0.2)
+            fig.savefig(os.path.join(save_dir, filename))
+            plt.close(fig)
+
+            count += 1
+            images.append(f"{save_dir}/{filename}.png")
+
+        # Create GIF
+        loaded_images = [imageio.imread(image) for image in images]
+        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=4, loop=0)
+
+        # Delete saved images
+        for filepath in images:
+            os.remove(filepath)
+
     def plot_attn_score_heat_map(
         self,
         x_heat: np.ndarray,
         attn_score: np.ndarray,
         filename: str = "heat_map_attention_score",
+        ax: plt.Axes = None,
         saved_dir: Union[str, None] = "./figure",
-    ) -> None:
+    ) -> (plt.Figure, plt.Axes):
         """Visualize attention score through heat map"""
-
         fig = plt.figure(figsize=self.figsize)
-        ax = plt.axes()
-        cax = ax.imshow(attn_score, cmap="YlGnBu", aspect="auto")
-        cbar = fig.colorbar(cax, ax=ax)
+        if ax is None:
+            ax = plt.axes()
+        cax = ax.imshow(attn_score, cmap="OrRd", aspect="auto")
+        cbar = fig.colorbar(cax, ax=ax, orientation="horizontal")
         cbar.ax.tick_params(labelsize=self.fontsize)
 
         # x axis
@@ -209,8 +330,9 @@ class Visualizer:
             plt.savefig(saving_path, bbox_inches="tight")
             plt.close()
             print(f"Figure {filename} saved at {saved_dir}")
-        else:
-            plt.show()
+        plt.close()
+
+        return fig, ax
 
     def plot_prediction(
         self,
@@ -220,13 +342,16 @@ class Visualizer:
         pred_high: Union[np.ndarray, None] = None,
         x_actual: Union[np.ndarray, None] = None,
         actual_val: Union[np.ndarray, None] = None,
+        ax: plt.Axes = None,
         filename: str = "prediction",
         saved_dir: Union[str, None] = "./figure",
+        is_subplot: bool = False,
     ) -> (plt.Figure, plt.Axes):
         """Plot prediction versus actual"""
 
         fig = plt.figure(figsize=self.figsize)
-        ax = plt.axes()
+        if ax is None:
+            ax = plt.axes()
 
         # Plot prediction
         ax.plot(x_pred, pred_val, lw=self.lw, color="tab:blue", label="Prediction")
@@ -234,15 +359,17 @@ class Visualizer:
         # Plot uncertainty bounds if they exist
         if pred_low is not None and pred_high is not None:
             ax.fill_between(
-                x_pred, pred_low, pred_high, facecolor="green", alpha=0.3, label="Uncertainty"
+                x_pred, pred_low, pred_high, facecolor="tab:blue", alpha=0.4, label="Uncertainty"
             )
 
         # Plot actual values if they exist
         if x_actual is not None and actual_val is not None:
-            ax.plot(x_actual, actual_val, lw=self.lw, color="tab:red", label="Actual")
+            ax.plot(
+                x_actual, actual_val, lw=self.lw, linestyle="--", color="tab:red", label="Actual"
+            )
 
         # Set number after comma
-        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.2f}".format(x)))
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x)))
 
         # Setting y-ticks for ax1
         y_vals_combined = (
@@ -262,19 +389,27 @@ class Visualizer:
         ax.set_xticks(x_ticks)
         ax.tick_params(axis="both", which="both", direction="inout", labelsize=self.fontsize)
         ax.set_ylim([min_y_vals, max_y_vals])
-        ax.plot(
-            [x_pred[0], x_pred[0]],
-            [min_y_vals, max_y_vals],
-            color="black",
-            linestyle="--",
-            lw=self.lw,
-        )
+        ax.plot([x_pred[0], x_pred[0]], [min_y_vals, max_y_vals], color="black", lw=1.2 * self.lw)
         ax.set_xlabel("Time Index", fontsize=self.fontsize)
         ax.set_ylabel("Power Usage", fontsize=self.fontsize)
 
-        ax.legend(
-            loc="best", edgecolor="black", fontsize=0.9 * self.fontsize, ncol=2, framealpha=0.3
-        )
+        if not is_subplot:
+            ax.legend(
+                loc="upper center",
+                bbox_to_anchor=(0.5, -0.25),
+                edgecolor="black",
+                fontsize=0.9 * self.fontsize,
+                ncol=3,
+                framealpha=0.3,
+            )
+        else:
+            ax.legend(
+                loc="lower center",
+                edgecolor="black",
+                fontsize=0.9 * self.fontsize,
+                ncol=3,
+                framealpha=0.3,
+            )
         ax.set_title("Prediction vs Actual", fontsize=self.fontsize, fontweight="semibold")
         fig.tight_layout()
 
@@ -285,8 +420,8 @@ class Visualizer:
             plt.savefig(saving_path, bbox_inches="tight")
             plt.close()
             print(f"Figure {filename} saved at {saved_dir}")
-        else:
-            plt.show()
+
+        plt.close()
 
         return fig, ax
 
@@ -299,6 +434,8 @@ class Visualizer:
         horizon_idx: int,
         x_actual: Union[np.ndarray, None] = None,
         actual_val: Union[np.ndarray, None] = None,
+        pred_low: Union[np.ndarray, None] = None,
+        pred_high: Union[np.ndarray, None] = None,
         filename: str = "attention_score",
         saved_dir: Union[str, None] = "./figure",
     ) -> None:
@@ -316,10 +453,18 @@ class Visualizer:
 
         # If actual values are provided, plot them on the same axis
         if x_actual is not None and actual_val is not None:
-            ax1.plot(x_actual, actual_val, color="tab:red", lw=self.lw, label="Actual")
+            ax1.plot(
+                x_actual, actual_val, linestyle="--", color="tab:red", lw=self.lw, label="Actual"
+            )
+
+        # Plot uncertainty bounds if they exist
+        if pred_low is not None and pred_high is not None:
+            ax1.fill_between(
+                x_pred, pred_low, pred_high, facecolor="tab:blue", alpha=0.4, label="Uncertainty"
+            )
 
         # Set number after comma
-        ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.2f}".format(x)))
+        ax1.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, loc: "{:.0f}".format(x)))
 
         # Setting y-ticks for ax1
         y_vals_combined = pred_val if x_actual is None else np.concatenate([pred_val, actual_val])
@@ -342,8 +487,7 @@ class Visualizer:
             [x_pred[0], x_pred[0]],
             [attn_score.min(), attn_score.max()],
             color="black",
-            linestyle="--",
-            lw=self.lw,
+            lw=1.2 * self.lw,
         )
         ax2.tick_params(
             axis="y",
@@ -370,10 +514,11 @@ class Visualizer:
         ax1.legend(
             lines,
             labels,
-            loc="best",
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.25),
             edgecolor="black",
             fontsize=0.9 * self.fontsize,
-            ncol=2,
+            ncol=4,
             framealpha=0.3,
         )
 
@@ -390,10 +535,10 @@ class Visualizer:
             os.makedirs(saved_dir, exist_ok=True)
             saving_path = f"{saved_dir}/{filename}.png"
             plt.savefig(saving_path, bbox_inches="tight")
-            plt.close()
             print(f"Figure {filename} saved at {saved_dir}")
         else:
             plt.show()
+        plt.close()
 
     def plot_importance_features(
         self,

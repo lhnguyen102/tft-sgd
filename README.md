@@ -33,6 +33,11 @@ python runner.py
 
 ### Power Usage Prediction
 <p align="center">
+  <img src="./figure/forecast.gif" width="700px" height="480px" >
+</p>
+
+### Prediction Interpretation
+<p align="center" style="margin-top: 20px;">
   <img src="./figure/prediction.png" width="340px">
   &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
   <img src="./figure/heat_map_attention_score.png" width="340px">
