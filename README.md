@@ -4,7 +4,7 @@ This implementation, adapted from the referenced repository [pytorch-forecasting
 , simplified for developers outside the computer science field.
 
 <p align="center">
-  <img src="./figure/forecast.gif" width="700px" height="480px" >
+  <img src="./figure/forecast.gif" width="700px" height="500px" >
 </p>
 
 ## Installation

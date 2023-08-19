@@ -283,7 +283,7 @@ class Visualizer:
 
         # Create GIF
         loaded_images = [imageio.imread(image) for image in images]
-        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=4, loop=0)
+        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=5, loop=0)
 
         # Delete saved images
         for filepath in images:
@@ -301,7 +301,7 @@ class Visualizer:
         fig = plt.figure(figsize=self.figsize)
         if ax is None:
             ax = plt.axes()
-        cax = ax.imshow(attn_score, cmap="OrRd", aspect="auto")
+        cax = ax.imshow(attn_score, cmap="YlGnBu", aspect="auto")
         cbar = fig.colorbar(cax, ax=ax, orientation="horizontal")
         cbar.ax.tick_params(labelsize=self.fontsize)
 
