@@ -41,8 +41,6 @@ class QuantileLoss(nn.Module):
         total_loss = 0.0
         for i, tau in enumerate(self.quantiles):
             # TODO: need to handle multi-variates)
-            total_loss += self.weighted_quantile_loss(
-                y_pred=y_pred[..., [i]], y_true=y_true, tau=tau
-            )
+            total_loss += self.quantile_loss(y_pred=y_pred[..., [i]], y_true=y_true, tau=tau)
 
         return total_loss / len(self.quantiles)

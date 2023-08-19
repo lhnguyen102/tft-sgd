@@ -53,7 +53,7 @@ class TFTConfig:
     batch_size: int = 128
     output_size: Union[List[int], int] = 7
     hidden_size: int = 150
-    num_lstm_layers: int = 1
+    num_lstm_layers: int = 2
     num_attn_head_size: int = 4
     dropout: float = 0.1
     hidden_cont_size: int = 150

@@ -162,7 +162,7 @@ def main():
         )
         if avg_val_loss < best_val_loss:
             best_val_loss = avg_val_loss
-            tft_model.save()
+        tft_model.save()
 
     # Test
     print("Testing...")
