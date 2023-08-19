@@ -130,39 +130,39 @@ def main():
     )
     test_dataloader = DataLoader(test_dataset, batch_size=1, collate_fn=custom_collate_fn)
 
-    # Train
-    best_val_loss = np.inf
-    print("Training...")
-    for e in range(cfg.num_epochs):
-        losses = []
-        for i, (x_batch, y_batch, _) in tqdm(
-            enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
-        ):
-            x_batch, y_batch = send_data_to_device(
-                input_batch=x_batch, output_batch=y_batch, device=device
-            )
-            pred = tft_model.network(x_batch)
-            loss = loss_fn(pred.prediction, y_batch.target)
+    # # Train
+    # best_val_loss = np.inf
+    # print("Training...")
+    # for e in range(cfg.num_epochs):
+    #     losses = []
+    #     for i, (x_batch, y_batch, _) in tqdm(
+    #         enumerate(dataloader), total=len(dataloader), desc=f"Epoch {e+1}/{cfg.num_epochs}"
+    #     ):
+    #         x_batch, y_batch = send_data_to_device(
+    #             input_batch=x_batch, output_batch=y_batch, device=device
+    #         )
+    #         pred = tft_model.network(x_batch)
+    #         loss = loss_fn(pred.prediction, y_batch.target)
 
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+    #         optimizer.zero_grad()
+    #         loss.backward()
+    #         optimizer.step()
 
-            losses.append(loss.item())
-            if np.isnan(loss.item()):
-                raise ValueError("Loss is NAN")
-        avg_train_loss = sum(losses) / len(losses)
+    #         losses.append(loss.item())
+    #         if np.isnan(loss.item()):
+    #             raise ValueError("Loss is NAN")
+    #     avg_train_loss = sum(losses) / len(losses)
 
-        # Validate
-        avg_val_loss = validate(
-            dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn, device=device
-        )
-        print(
-            f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
-        )
-        if avg_val_loss < best_val_loss:
-            best_val_loss = avg_val_loss
-        tft_model.save()
+    #     # Validate
+    #     avg_val_loss = validate(
+    #         dataloader=val_dataloader, network=tft_model.network, loss_fn=loss_fn, device=device
+    #     )
+    #     print(
+    #         f"Epoch #{e}/{cfg.num_epochs}| Train loss: {avg_train_loss:.4f} | Val loss: {avg_val_loss: .4f}"
+    #     )
+    #     if avg_val_loss < best_val_loss:
+    #         best_val_loss = avg_val_loss
+    #     tft_model.save()
 
     # Test
     print("Testing...")

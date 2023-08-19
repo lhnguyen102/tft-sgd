@@ -269,6 +269,8 @@ class Visualizer:
             linestyle="--",
             lw=self.lw,
         )
+        ax.set_xlabel("Time Index", fontsize=self.fontsize)
+        ax.set_ylabel("Power Usage", fontsize=self.fontsize)
 
         ax.legend(
             loc="best", edgecolor="black", fontsize=0.9 * self.fontsize, ncol=2, framealpha=0.3
@@ -309,7 +311,7 @@ class Visualizer:
 
         # Plot predicted values on main y-axis
         ax1.set_xlabel("Time Index", fontsize=self.fontsize)
-        ax1.set_ylabel("Predicted Value", fontsize=self.fontsize)
+        ax1.set_ylabel("Power Usage", fontsize=self.fontsize)
         ax1.plot(x_pred, pred_val, lw=self.lw, color="tab:blue", label="Prediction")
 
         # If actual values are provided, plot them on the same axis
