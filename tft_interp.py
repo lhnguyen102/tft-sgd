@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from PIL import Image
+from matplotlib.colors import LinearSegmentedColormap
+
 
 from config import TFTConfig
 from tft import TFTOutput
@@ -264,6 +266,7 @@ class Visualizer:
         ):
             # Figure setup
             filename = f"prediction_{count}"
+            plt.style.use("default")
             fig, axs = plt.subplots(nrows=2, ncols=1, figsize=(22, 16))
             self.lw = 4
             self.fontsize = 26
@@ -286,19 +289,53 @@ class Visualizer:
             )
             fig.tight_layout()
             fig.subplots_adjust(hspace=0.2)
-            plt.savefig(os.path.join(save_dir, filename))
+            # Setting the gradient background
+            self.set_gradient_background(axs[0], ["#FFDDDD", "#FFFFFF", "#DDDDFF"])
+            fig.savefig(os.path.join(save_dir, filename))
             plt.close(fig)
 
             count += 1
             images.append(f"{save_dir}/{filename}.png")
 
         # Create GIF
-        loaded_images = [imageio.imread(image) for image in images]
-        imageio.mimsave(f"{save_dir}/forecast.gif", loaded_images, duration=2, loop=0)
+        img, *imgs = [Image.open(image) for image in images]
+        img.save(
+            fp=f"{save_dir}/forecast.gif", append_images=imgs, save_all=True, duration=150, loop=0
+        )
 
         # Delete saved images
         for filepath in images:
             os.remove(filepath)
+
+    @staticmethod
+    def set_gradient_background(ax, colors):
+        """
+        Set a multi-color linear gradient background to an axis.
+
+        Parameters:
+            ax (matplotlib.axes.Axes): Axis object
+            colors (list of str): List of hex colors
+        """
+        n = len(colors) - 1
+        data = np.linspace(0, 1, 256).reshape(1, -1)
+        data = np.vstack([data] * 256)
+
+        # Get axis limits
+        xlim = ax.get_xlim()
+        ylim = ax.get_ylim()
+
+        # Create gradient color map
+        cmap = plt.matplotlib.colors.LinearSegmentedColormap.from_list("custom", colors, N=256)
+
+        ax.imshow(
+            data,
+            aspect="auto",
+            cmap=cmap,
+            origin="lower",
+            extent=[xlim[0], xlim[1], ylim[0], ylim[1]],
+        )
+        ax.set_xlim(xlim)
+        ax.set_ylim(ylim)
 
     def plot_attn_score_heat_map(
         self,
@@ -313,7 +350,7 @@ class Visualizer:
         if ax is None:
             ax = plt.axes()
         cax = ax.imshow(attn_score, cmap="OrRd", aspect="auto", vmin=0, vmax=1)
-        cbar = fig.colorbar(cax, ax=ax, orientation="horizontal")
+        cbar = plt.colorbar(cax, ax=ax, orientation="horizontal")
         cbar.ax.tick_params(labelsize=self.fontsize)
 
         # x axis
