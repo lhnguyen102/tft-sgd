@@ -31,11 +31,6 @@ unzip LD2011_2014.txt.zip
 python runner.py
 ```
 
-### Power Usage Prediction
-<p align="center">
-  <img src="./figure/forecast.gif" width="700px" height="480px" >
-</p>
-
 ### Prediction Interpretation
 <p align="center" style="margin-top: 20px;">
   <img src="./figure/attention_score.png" width="340px">
