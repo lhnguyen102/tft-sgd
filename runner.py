@@ -17,7 +17,7 @@ def load_data_from_txt() -> pd.DataFrame:
     """Load data frame from a text file"""
 
     # Load raw data
-    data = pd.read_csv("LD2011_2014.txt", index_col=0, sep=";", decimal=",")
+    data = pd.read_csv("./data/LD2011_2014.txt", index_col=0, sep=";", decimal=",")
     data.index = pd.to_datetime(data.index)
     data.sort_index(inplace=True)
 

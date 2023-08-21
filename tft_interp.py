@@ -289,8 +289,6 @@ class Visualizer:
             )
             fig.tight_layout()
             fig.subplots_adjust(hspace=0.2)
-            # Setting the gradient background
-            self.set_gradient_background(axs[0], ["#FFDDDD", "#FFFFFF", "#DDDDFF"])
             fig.savefig(os.path.join(save_dir, filename))
             plt.close(fig)
 
@@ -427,7 +425,7 @@ class Visualizer:
         )
         max_y_vals = y_vals_combined.max()
         min_y_vals = y_vals_combined.min()
-        y_ticks = np.linspace(y_vals_combined.min(), y_vals_combined.max(), self.ndiv_y)
+        y_ticks = np.linspace(min_y_vals, max_y_vals, self.ndiv_y)
         ax.set_yticks(y_ticks)
 
         # Setting x-ticks based on provided x-values

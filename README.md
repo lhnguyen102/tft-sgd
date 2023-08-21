@@ -25,7 +25,8 @@ pip install -r requirements.txt
 
 ## Example of Power Usage Prediction
 ### Download Example Data
-Either run the following command to download the data or directly visit the provided URL
+Either run the following command to download the data or directly visit the provided URL.
+NOTE: data must be saved in a folder `data/`
 
 ```shell
 wget https://archive.ics.uci.edu/ml/machine-learning-databases/00321/LD2011_2014.txt.zip
@@ -54,13 +55,13 @@ python runner.py
 ## Directory Structure
 ```
 .
-├── runner.py                         # Run the training step
-├── config                            # User-specified data variables and hyperparameters for TFT
-├── data_preprocessor.py              # Preprocess data for TFT format
-├── metric.py                         # Loss function for training e.g., Quantile loss
-├── model.py                          # All model architectures required for TFT 
-├── tft.py                            # TFT model
-├── tft_interp.py                     # Output interpretation and visual tools
+├── runner.py                       # Run the training step
+├── config                          # User-specified data variables and hyperparameters for TFT
+├── data_preprocessor.py            # Preprocess data for TFT format
+├── metric.py                       # Loss function for training e.g., Quantile loss
+├── model.py                        # All model architectures required for TFT 
+├── tft.py                          # TFT model
+├── tft_interp.py                   # Output interpretation and visual tools
 
 ```
 
